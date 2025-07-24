@@ -652,6 +652,54 @@ func parseMessageContent(paramsMessage callapi.ParamsContent, message callapi.Ac
 				} else {
 					mylog.Printf("Error: markdown segment data is nil.")
 				}
+			case "ark":
+				// 处理 ark 类型的消息段
+				arkContent, ok := segmentMap["data"].(map[string]interface{})["data"]
+				if ok {
+					var arkContentEncoded string
+					// 检查 arkContent 的类型
+					if arkContentMap, isMap := arkContent.(map[string]interface{}); isMap {
+						arkContentBytes, err := json.Marshal(arkContentMap)
+						if err != nil {
+							mylog.Printf("Error marshaling arkContentMap to JSON:%v", err)
+							continue
+						}
+						// 编码为 Base64 字符串
+						arkContentEncoded = base64.StdEncoding.EncodeToString(arkContentBytes)
+					} else if arkContentStr, isString := arkContent.(string); isString {
+						// 检查是否为 Base64 编码的字符串
+						if strings.HasPrefix(arkContentStr, "base64://") {
+							// 去掉 "base64://" 头部
+							arkContentEncoded = strings.TrimPrefix(arkContentStr, "base64://")
+						} else {
+							// 特殊字符反转义
+							arkContentStr = strings.ReplaceAll(arkContentStr, "&amp;", "&")
+							arkContentStr = strings.ReplaceAll(arkContentStr, "&#91;", "[")
+							arkContentStr = strings.ReplaceAll(arkContentStr, "&#93;", "]")
+							arkContentStr = strings.ReplaceAll(arkContentStr, "&#44;", ",")
+							var jsonMap map[string]interface{}
+							// 反序列化字符串为 JSON 对象
+							if err := json.Unmarshal([]byte(arkContentStr), &jsonMap); err != nil {
+								mylog.Printf("Error unmarshaling string to JSON:%v", err)
+								continue
+							}
+							// 将 JSON 对象序列化为字节数组
+							arkContentBytes, err := json.Marshal(jsonMap)
+							if err != nil {
+								mylog.Printf("Error marshaling jsonMap to JSON:%v", err)
+								continue
+							}
+							// 将字节数组编码为 Base64 字符串
+							arkContentEncoded = base64.StdEncoding.EncodeToString(arkContentBytes)
+						}
+					} else {
+						mylog.Printf("Error marshaling ark segment wrong type.")
+						continue
+					}
+					foundItems["ark"] = append(foundItems["ark"], arkContentEncoded)
+				} else {
+					mylog.Printf("Error: ark segment data is nil.")
+				}
 
 			default:
 				mylog.Printf("Unhandled segment type: %s", segmentType)
@@ -778,6 +826,41 @@ func parseMessageContent(paramsMessage callapi.ParamsContent, message callapi.Ac
 				foundItems["markdown"] = append(foundItems["markdown"], mdContentEncoded)
 			} else {
 				mylog.Printf("Error: markdown segment data is nil.")
+			}
+		case "ark":
+			arkContent, ok := message["data"].(map[string]interface{})["data"]
+			if ok {
+				var arkContentEncoded string
+				if arkContentMap, isMap := arkContent.(map[string]interface{}); isMap {
+					arkContentBytes, err := json.Marshal(arkContentMap)
+					if err != nil {
+						mylog.Printf("Error marshaling mdContentMap to JSON:%v", err)
+					}
+					arkContentEncoded = base64.StdEncoding.EncodeToString(arkContentBytes)
+				} else if arkContentStr, isString := arkContent.(string); isString {
+					if strings.HasPrefix(arkContentStr, "base64://") {
+						arkContentEncoded = strings.TrimPrefix(arkContentStr, "base64://")
+					} else {
+						arkContentStr = strings.ReplaceAll(arkContentStr, "&amp;", "&")
+						arkContentStr = strings.ReplaceAll(arkContentStr, "&#91;", "[")
+						arkContentStr = strings.ReplaceAll(arkContentStr, "&#93;", "]")
+						arkContentStr = strings.ReplaceAll(arkContentStr, "&#44;", ",")
+						var jsonMap map[string]interface{}
+						if err := json.Unmarshal([]byte(arkContentStr), &jsonMap); err != nil {
+							mylog.Printf("Error unmarshaling string to JSON:%v", err)
+						}
+						mdContentBytes, err := json.Marshal(jsonMap)
+						if err != nil {
+							mylog.Printf("Error marshaling jsonMap to JSON:%v", err)
+						}
+						arkContentEncoded = base64.StdEncoding.EncodeToString(mdContentBytes)
+					}
+				} else {
+					mylog.Printf("Error: ark content has an unexpected type.")
+				}
+				foundItems["ark"] = append(foundItems["ark"], arkContentEncoded)
+			} else {
+				mylog.Printf("Error: ark segment data is nil.")
 			}
 
 		default:
@@ -1685,6 +1768,31 @@ func parseMDData(mdData []byte) (*dto.Markdown, *keyboard.MessageKeyboard, error
 	}
 
 	return md, kb, nil
+}
+
+func parseArkData(ArkData []byte) (*dto.Ark, error) {
+	// 定义一个用于解析 Ark JSON 的临时结构体
+	var temp struct {
+		Ark struct {
+			TemplateID *int         `json:"template_id,omitempty"`
+			ArkKV      []*dto.ArkKV `json:"kv,omitempty"`
+		} `json:"ark,omitempty"`
+	}
+
+	// 解析 JSON
+	if err := json.Unmarshal(ArkData, &temp); err != nil {
+		return nil, err
+	}
+	if temp.Ark.TemplateID == nil {
+		return nil, errors.New("template_id is required in Ark data")
+	}
+	// 处理 Ark
+	ark := &dto.Ark{
+		TemplateID: *temp.Ark.TemplateID,
+		KV:         temp.Ark.ArkKV,
+	}
+
+	return ark, nil
 }
 
 func parseQQMuiscMDData(musicid string) (*dto.Markdown, *keyboard.MessageKeyboard, error) {
