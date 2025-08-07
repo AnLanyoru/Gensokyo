@@ -166,6 +166,10 @@ func HandleSendGroupMsg(client callapi.Client, api openapi.OpenAPI, apiv2 openap
 				messageID = echo.GetMsgIDByKey(echoStr)
 				mylog.Println("echo取群组发信息对应的message_id:", messageID)
 			}
+			if messageID == "" {
+				messageID = message.Params.MessageID.(string)
+				mylog.Println("echo取message_id失败,从action中取群组发信息对应的message_id:", messageID)
+			}
 		}
 
 		var originalGroupID, originalUserID string
@@ -492,6 +496,7 @@ func HandleSendGroupMsg(client callapi.Client, api openapi.OpenAPI, apiv2 openap
 					// 定义一个map来存储关键字
 					keyMap := map[string]bool{
 						"markdown":      true,
+						"ark":           true,
 						"qqmusic":       true,
 						"local_image":   true,
 						"local_record":  true,
@@ -1295,6 +1300,26 @@ func generateGroupMessage(id string, eventid string, foundItems map[string][]str
 			Content:    "", // 这个字段文档没有了
 			SrvSendMsg: false,
 		}
+	} else if arkContent, ok := foundItems["ark"]; ok && len(arkContent) > 0 {
+		// 解码base64 markdown数据
+		arkData, err := base64.StdEncoding.DecodeString(arkContent[0])
+		if err != nil {
+			mylog.Printf("failed to decode base64 ark: %v", err)
+			return nil
+		}
+		ark, err := parseArkData(arkData)
+		if err != nil {
+			mylog.Printf("failed to parseArkData: %v", err)
+			return nil
+		}
+		return &dto.MessageToCreate{
+			Content: "ark",
+			MsgID:   id,
+			EventID: eventid,
+			MsgSeq:  msgseq,
+			Ark:     ark,
+			MsgType: 3,
+		}
 	} else if mdContent, ok := foundItems["markdown"]; ok && len(mdContent) > 0 {
 		// 解码base64 markdown数据
 		mdData, err := base64.StdEncoding.DecodeString(mdContent[0])
@@ -1919,6 +1944,26 @@ func generatePrivateMessage(id string, eventid string, foundItems map[string][]s
 			Markdown: markdown,
 			Keyboard: keyboard,
 			MsgType:  2,
+		}
+	} else if arkContent, ok := foundItems["ark"]; ok && len(arkContent) > 0 {
+		// 解码base64 ark数据
+		arkData, err := base64.StdEncoding.DecodeString(arkContent[0])
+		if err != nil {
+			mylog.Printf("failed to decode base64 ark: %v", err)
+			return nil
+		}
+		ark, err := parseArkData(arkData)
+		if err != nil {
+			mylog.Printf("failed to parseArkData: %v", err)
+			return nil
+		}
+		return &dto.MessageToCreate{
+			Content: "ark",
+			MsgID:   id,
+			EventID: eventid,
+			MsgSeq:  msgseq,
+			Ark:     ark,
+			MsgType: 3,
 		}
 	} else if qqmusic, ok := foundItems["qqmusic"]; ok && len(qqmusic) > 0 {
 		// 转换qq音乐id到一个md
