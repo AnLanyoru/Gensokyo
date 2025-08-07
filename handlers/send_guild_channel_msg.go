@@ -509,6 +509,26 @@ func GenerateReplyMessage(id string, foundItems map[string][]string, messageText
 			MsgType:  2,
 		}
 		return msgtocreate, false
+	} else if arkContent, ok := foundItems["ark"]; ok && len(arkContent) > 0 {
+		// 解码base64 markdown数据
+		arkData, err := base64.StdEncoding.DecodeString(arkContent[0])
+		if err != nil {
+			mylog.Printf("failed to decode base64 ark: %v", err)
+			return nil, false
+		}
+		ark, err := parseArkData(arkData)
+		if err != nil {
+			mylog.Printf("failed to parseArkData: %v", err)
+			return nil, false
+		}
+		msgtocreate := &dto.MessageToCreate{
+			Content: "ark",
+			MsgID:   id,
+			MsgSeq:  msgseq,
+			Ark:     ark,
+			MsgType: 3,
+		}
+		return msgtocreate, false
 	} else {
 		// 发文本信息
 		reply = dto.MessageToCreate{
