@@ -188,14 +188,15 @@ func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData) error {
 	// 是否使用string形式上报
 	if !config.GetStringOb11() {
 		groupMsg = OnebotGroupMessage{
-			RawMessage:  messageText,
-			Message:     segmentedMessages,
-			MessageID:   messageID,
-			GroupID:     GroupID64,
-			MessageType: "group",
-			PostType:    "message",
-			SelfID:      selfid64,
-			UserID:      userid64,
+			RawMessage:    messageText,
+			Message:       segmentedMessages,
+			MessageID:     messageID,
+			RealMessageID: data.ID,
+			GroupID:       GroupID64,
+			MessageType:   "group",
+			PostType:      "message",
+			SelfID:        selfid64,
+			UserID:        userid64,
 			Sender: Sender{
 				UserID: userid64,
 				Sex:    "0",

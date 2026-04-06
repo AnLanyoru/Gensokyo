@@ -74,7 +74,7 @@ func HandleSendPrivateMsg(client callapi.Client, api openapi.OpenAPI, apiv2 open
 	// New checks for UserID and GroupID being nil or 0
 	if (message.Params.UserID == nil || !checkZeroUserID(message.Params.UserID)) &&
 		(message.Params.GroupID == nil || !checkZeroGroupID(message.Params.GroupID)) {
-		mylog.Printf("send_group_msgs接收到错误action: %v", message)
+		mylog.Printf("send_private_msgs接收到错误action: %v", message)
 		return "", nil
 	}
 
@@ -145,6 +145,11 @@ func HandleSendPrivateMsg(client callapi.Client, api openapi.OpenAPI, apiv2 open
 		var messageID string
 		// EventID
 		var eventID string
+		if len(message.Params.MessageID.(string)) == 32 {
+			// action里直接传了openid message_id 就用它
+			messageID = message.Params.MessageID.(string)
+			mylog.Println("从action中取私聊发信息对应的message_id:", messageID)
+		}
 		if config.GetLazyMessageId() {
 			//由于实现了Params的自定义unmarshell 所以可以类型安全的断言为string
 			messageID = echo.GetLazyMessagesId(UserID)

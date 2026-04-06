@@ -246,14 +246,15 @@ func (p *Processors) ProcessC2CMessage(data *dto.WSC2CMessageData) error {
 			}
 
 			groupMsg := OnebotGroupMessage{
-				RawMessage:  messageText,
-				Message:     messageText,
-				MessageID:   messageID,
-				GroupID:     userid64,
-				MessageType: "group",
-				PostType:    "message",
-				SelfID:      selfid64,
-				UserID:      userid64,
+				RawMessage:    messageText,
+				Message:       messageText,
+				MessageID:     messageID,
+				RealMessageID: data.ID,
+				GroupID:       userid64,
+				MessageType:   "group",
+				PostType:      "message",
+				SelfID:        selfid64,
+				UserID:        userid64,
 				Sender: Sender{
 					UserID: userid64,
 					TinyID: "0",
@@ -398,9 +399,9 @@ func (p *Processors) ProcessC2CMessage(data *dto.WSC2CMessageData) error {
 					Area:   "0",
 					Level:  "0",
 				},
-				SubType: "normal",
-				Time:    time.Now().Unix(),
-				Platform:    "qq",
+				SubType:  "normal",
+				Time:     time.Now().Unix(),
+				Platform: "qq",
 			}
 
 			//增强配置

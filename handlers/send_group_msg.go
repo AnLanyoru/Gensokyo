@@ -169,7 +169,7 @@ func HandleSendGroupMsg(client callapi.Client, api openapi.OpenAPI, apiv2 openap
 			}
 			if messageID == "" {
 				messageID = message.Params.MessageID.(string)
-				mylog.Println("echo取message_id失败,从action中取群组发信息对应的message_id:", messageID)
+				mylog.Println("从action中取群组发信息对应的message_id:", messageID)
 			}
 		}
 
