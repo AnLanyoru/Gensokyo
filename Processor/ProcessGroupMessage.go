@@ -276,6 +276,12 @@ func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData) error {
 		if len(data.Attachments) > 0 {
 			imgurl = data.Attachments[0].URL
 		}
+
+		//将真实id转为int userid64
+		userid64, err := idmap.GenerateRowID(data.Author.ID, 9)
+		if err != nil {
+			mylog.Errorf("Error storing ID: %v", err)
+		}
 		groupMsgS := OnebotGroupMessage{
 			RawMessage:    messageText,
 			Message:       segmentedMessages,
