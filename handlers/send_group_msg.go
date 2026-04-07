@@ -38,6 +38,7 @@ func HandleSendGroupMsg(client callapi.Client, api openapi.OpenAPI, apiv2 openap
 	if echoStr, ok := message.Echo.(string); ok {
 		// 当 message.Echo 是字符串类型时执行此块
 		msgType = echo.GetMsgTypeByKey(echoStr)
+		mylog.Println("echo取群组发信息对应的message_type:", msgType)
 	}
 	// 检查GroupID是否为0
 	checkZeroGroupID := func(id interface{}) bool {

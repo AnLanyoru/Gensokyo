@@ -47,14 +47,6 @@ func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData) error {
 		unioncache.Store(data.Author.ID, data.Author.UnionOpenID)
 	}
 
-	var platform string
-	if config.GetUnionID() {
-		data.Author.ID = data.Author.UnionOpenID
-		platform = "unionqq"
-	} else {
-		platform = "qq"
-	}
-
 	if !config.GetStringOb11() {
 		if config.GetIdmapPro() {
 			//将真实id转为int userid64
@@ -148,6 +140,12 @@ func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData) error {
 			}
 		}
 		messageID = int(messageID64)
+	} else {
+		messageID64, err := idmap.GenerateRowID(data.ID, 9)
+		if err != nil {
+			log.Fatalf("Error storing ID: %v", err)
+		}
+		messageID = int(messageID64)
 	}
 
 	if config.GetAutoBind() {
@@ -182,7 +180,6 @@ func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData) error {
 
 	//mylog.Printf("回调测试-群:%v\n", segmentedMessages)
 	var groupMsg OnebotGroupMessage
-	var groupMsgS OnebotGroupMessageS
 	var groupMsgMap map[string]interface{}
 
 	// 是否使用string形式上报
@@ -279,15 +276,16 @@ func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData) error {
 		if len(data.Attachments) > 0 {
 			imgurl = data.Attachments[0].URL
 		}
-		groupMsgS = OnebotGroupMessageS{
-			RawMessage:  messageText,
-			Message:     segmentedMessages,
-			MessageID:   data.ID,
-			GroupID:     data.GroupID,
-			MessageType: "group",
-			PostType:    "message",
-			SelfID:      selfid64,
-			UserID:      data.Author.ID,
+		groupMsgS := OnebotGroupMessage{
+			RawMessage:    messageText,
+			Message:       segmentedMessages,
+			MessageID:     messageID,
+			RealMessageID: data.ID,
+			GroupID:       GroupID64,
+			MessageType:   "group",
+			PostType:      "message",
+			SelfID:        selfid64,
+			UserID:        userid64,
 			Sender: Sender{
 				UserID: userid64,
 				Sex:    "0",
@@ -295,9 +293,8 @@ func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData) error {
 				Area:   imgurl,
 				Level:  "0",
 			},
-			SubType:  "normal",
-			Time:     time.Now().Unix(),
-			Platform: platform,
+			SubType: "normal",
+			Time:    time.Now().Unix(),
 		}
 		// 增强配置
 		if !config.GetNativeOb11() {
@@ -335,15 +332,6 @@ func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData) error {
 		} else {
 			groupMsgS.Sender.Role = "member"
 		}
-		// 将当前s和appid和message进行映射
-		echo.AddMsgID(AppIDString, s, data.ID)
-		echo.AddMsgType(AppIDString, s, "group")
-		//储存当前群或频道号的类型
-		go idmap.WriteConfigv2(data.GroupID, "type", "group")
-		//懒message_id池
-		echo.AddLazyMessageId(data.GroupID, data.ID, time.Now())
-		//懒message_id池
-		echo.AddLazyMessageIdv2(data.GroupID, data.Author.ID, data.ID, time.Now())
 		// 调试
 		PrintStructWithFieldNames(groupMsgS)
 		// Convert OnebotGroupMessage to map and send
