@@ -35,10 +35,29 @@ func init() {
 func HandleSendGroupMsg(client callapi.Client, api openapi.OpenAPI, apiv2 openapi.OpenAPI, message callapi.ActionMessage) (string, error) {
 	// 使用 message.Echo 作为key来获取消息类型
 	var msgType string
-	if echoStr, ok := message.Echo.(string); ok {
-		// 当 message.Echo 是字符串类型时执行此块
-		msgType = echo.GetMsgTypeByKey(echoStr)
-		mylog.Println("echo取群组发信息对应的message_type:", msgType)
+	var idInt64 int64
+	var err error
+	var retmsg string
+	if message.Params.MessageType != "" {
+		msgType = message.Params.MessageType
+	}
+	if msgType == "" {
+		if echoStr, ok := message.Echo.(string); ok {
+			// 当 message.Echo 是字符串类型时执行此块
+			msgType = echo.GetMsgTypeByKey(echoStr)
+			mylog.Println("echo取群组发信息对应的message_type:", msgType)
+		}
+		if len(message.Params.GroupID.(string)) == 32 {
+			msgType = "group"
+		} else if message.Params.UserID != nil && len(message.Params.UserID.(string)) == 32 {
+			msgType = "group_private"
+		} else {
+			if message.Params.GroupID != "" {
+				idInt64, err = ConvertToInt64(message.Params.GroupID)
+			} else if message.Params.UserID != "" {
+				idInt64, err = ConvertToInt64(message.Params.UserID)
+			}
+		}
 	}
 	// 检查GroupID是否为0
 	checkZeroGroupID := func(id interface{}) bool {
@@ -96,21 +115,6 @@ func HandleSendGroupMsg(client callapi.Client, api openapi.OpenAPI, apiv2 openap
 	}
 
 	mylog.Printf("send_group_msg获取到信息类型:%v", msgType)
-	var idInt64 int64
-	var err error
-	var retmsg string
-
-	if len(message.Params.GroupID.(string)) == 32 {
-		msgType = "group"
-	} else if message.Params.UserID != nil && len(message.Params.UserID.(string)) == 32 {
-		msgType = "group_private"
-	} else {
-		if message.Params.GroupID != "" {
-			idInt64, err = ConvertToInt64(message.Params.GroupID)
-		} else if message.Params.UserID != "" {
-			idInt64, err = ConvertToInt64(message.Params.UserID)
-		}
-	}
 
 	if message.Params.GroupID != nil && len(message.Params.GroupID.(string)) != 32 {
 		// stringob11通过字段判断类型,不需要递归
@@ -2499,6 +2503,7 @@ func processImgUrl(input string) string {
 
 func postGroupMessageWithRetry(apiv2 openapi.OpenAPI, groupID string, groupMessage *dto.MessageToCreate) (resp *dto.GroupMessageResponse, err error) {
 	retryCount := 3 // 设置最大重试次数为3
+	mylog.ErrLogToFile("type", "触发重试机制")
 	for i := 0; i < retryCount; i++ {
 		// 递增msgid
 		msgseq := echo.GetMappingSeq(groupMessage.MsgID)

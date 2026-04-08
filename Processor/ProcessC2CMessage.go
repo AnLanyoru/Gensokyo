@@ -449,14 +449,6 @@ func (p *Processors) ProcessC2CMessage(data *dto.WSC2CMessageData) error {
 				go p.BroadcastMessageToAllFAF(groupMsgMap, p.Apiv2, data)
 			}
 
-			//组合FriendData
-			userdata := structs.FriendData{
-				Nickname: "",
-				Remark:   "",
-				UserID:   data.Author.ID,
-			}
-			//缓存私信好友列表
-			idmap.StoreUserInfo(data.Author.ID, userdata)
 		}
 	}
 
