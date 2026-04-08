@@ -79,6 +79,7 @@ type OnebotChannelMessage struct {
 type OnebotGroupMessage struct {
 	RawMessage      string      `json:"raw_message"`
 	MessageID       int         `json:"message_id"`
+	RealMessageID   string      `json:"real_message_id"`
 	GroupID         int64       `json:"group_id"` // Can be either string or int depending on p.Settings.CompleteFields
 	MessageType     string      `json:"message_type"`
 	PostType        string      `json:"post_type"`
