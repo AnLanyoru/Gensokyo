@@ -246,14 +246,15 @@ func (p *Processors) ProcessC2CMessage(data *dto.WSC2CMessageData) error {
 			}
 
 			groupMsg := OnebotGroupMessage{
-				RawMessage:  messageText,
-				Message:     messageText,
-				MessageID:   messageID,
-				GroupID:     userid64,
-				MessageType: "group",
-				PostType:    "message",
-				SelfID:      selfid64,
-				UserID:      userid64,
+				RawMessage:    messageText,
+				Message:       messageText,
+				MessageID:     messageID,
+				RealMessageID: data.ID,
+				GroupID:       userid64,
+				MessageType:   "group",
+				PostType:      "message",
+				SelfID:        selfid64,
+				UserID:        userid64,
 				Sender: Sender{
 					UserID: userid64,
 					TinyID: "0",
@@ -381,17 +382,28 @@ func (p *Processors) ProcessC2CMessage(data *dto.WSC2CMessageData) error {
 				}
 			}
 
-			groupMsg := OnebotGroupMessageS{
-				RawMessage:  messageText,
-				Message:     messageText,
-				MessageID:   data.ID,
-				GroupID:     data.Author.ID,
-				MessageType: "group",
-				PostType:    "message",
-				SelfID:      selfid64,
-				UserID:      data.Author.ID,
+			//将真实id转为int userid64
+			userid64, err := idmap.GenerateRowID(data.Author.ID, 9)
+			if err != nil {
+				mylog.Errorf("Error storing ID: %v", err)
+			}
+			messageID64, err := idmap.GenerateRowID(data.ID, 9)
+			if err != nil {
+				log.Fatalf("Error storing ID: %v", err)
+			}
+			messageID := int(messageID64)
+			groupMsg := OnebotGroupMessage{
+				RawMessage:    messageText,
+				Message:       messageText,
+				MessageID:     messageID,
+				RealMessageID: data.ID,
+				GroupID:       userid64,
+				MessageType:   "group",
+				PostType:      "message",
+				SelfID:        selfid64,
+				UserID:        userid64,
 				Sender: Sender{
-					UserID: 0,
+					UserID: userid64,
 					TinyID: "0",
 					Sex:    "0",
 					Age:    0,
@@ -400,7 +412,6 @@ func (p *Processors) ProcessC2CMessage(data *dto.WSC2CMessageData) error {
 				},
 				SubType: "normal",
 				Time:    time.Now().Unix(),
-				Platform:    "qq",
 			}
 
 			//增强配置
@@ -423,18 +434,6 @@ func (p *Processors) ProcessC2CMessage(data *dto.WSC2CMessageData) error {
 				echo.AddMsgIDv3(AppIDString, echostr, data.Content)
 			}
 
-			//将当前s和appid和message进行映射
-			echo.AddMsgID(AppIDString, s, data.ID)
-			echo.AddMsgType(AppIDString, s, "group_private")
-
-			echo.AddMsgIDv3(AppIDString, data.Author.ID, data.ID)
-
-			//储存当前群或频道号的类型
-			//idmap.WriteConfigv2(data.Author.ID, "type", "group_private")
-
-			//懒message_id池
-			echo.AddLazyMessageId(data.Author.ID, data.ID, time.Now())
-
 			//调试
 			PrintStructWithFieldNames(groupMsg)
 
@@ -450,14 +449,6 @@ func (p *Processors) ProcessC2CMessage(data *dto.WSC2CMessageData) error {
 				go p.BroadcastMessageToAllFAF(groupMsgMap, p.Apiv2, data)
 			}
 
-			//组合FriendData
-			userdata := structs.FriendData{
-				Nickname: "",
-				Remark:   "",
-				UserID:   data.Author.ID,
-			}
-			//缓存私信好友列表
-			idmap.StoreUserInfo(data.Author.ID, userdata)
 		}
 	}
 

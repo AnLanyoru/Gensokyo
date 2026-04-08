@@ -24,9 +24,14 @@ func HandleSendPrivateMsg(client callapi.Client, api openapi.OpenAPI, apiv2 open
 	// 使用 message.Echo 作为key来获取消息类型
 	var msgType string
 	var retmsg string
-	if echoStr, ok := message.Echo.(string); ok {
-		// 当 message.Echo 是字符串类型时执行此块
-		msgType = echo.GetMsgTypeByKey(echoStr)
+	if message.Params.MessageType != "" {
+		msgType = message.Params.MessageType
+	}
+	if msgType == "" {
+		if echoStr, ok := message.Echo.(string); ok {
+			// 当 message.Echo 是字符串类型时执行此块
+			msgType = echo.GetMsgTypeByKey(echoStr)
+		}
 	}
 	// 检查GroupID是否为0
 	checkZeroGroupID := func(id interface{}) bool {
@@ -74,43 +79,22 @@ func HandleSendPrivateMsg(client callapi.Client, api openapi.OpenAPI, apiv2 open
 	// New checks for UserID and GroupID being nil or 0
 	if (message.Params.UserID == nil || !checkZeroUserID(message.Params.UserID)) &&
 		(message.Params.GroupID == nil || !checkZeroGroupID(message.Params.GroupID)) {
-		mylog.Printf("send_group_msgs接收到错误action: %v", message)
+		mylog.Printf("send_private_msgs接收到错误action: %v", message)
 		return "", nil
 	}
-
-	var idInt64 int64
 	var err error
 
 	if message.Params.UserID != nil && len(message.Params.UserID.(string)) == 32 {
-		idInt64, err = idmap.GenerateRowID(message.Params.UserID.(string), 9)
+		_, err = idmap.GenerateRowID(message.Params.UserID.(string), 9)
 		// 临时的
 		msgType = "group_private"
 	} else {
 		if message.Params.GroupID != "" {
-			idInt64, err = ConvertToInt64(message.Params.GroupID)
+			_, err = ConvertToInt64(message.Params.GroupID)
 		} else if message.Params.UserID != "" {
-			idInt64, err = ConvertToInt64(message.Params.UserID)
+			_, err = ConvertToInt64(message.Params.UserID)
 		}
 	}
-
-	//设置递归 对直接向gsk发送action时有效果
-	if msgType == "" {
-		messageCopy := message
-		if err != nil {
-			mylog.Printf("错误：无法转换 ID %v\n", err)
-		} else {
-			// 递归3次
-			echo.AddMapping(idInt64, 4)
-			// 递归调用handleSendPrivateMsg，使用设置的消息类型
-			echo.AddMsgType(config.GetAppIDStr(), idInt64, "group_private")
-			HandleSendPrivateMsg(client, api, apiv2, messageCopy)
-		}
-	} else if echo.GetMapping(idInt64) <= 0 {
-		// 特殊值代表不递归
-		echo.AddMapping(idInt64, 10)
-	}
-
-	var resp *dto.C2CMessageResponse
 	switch msgType {
 	//这里是pr上来的,我也不明白为什么私聊会出现group类型 猜测是为了匹配包含了groupid的私聊?
 	case "group_private", "group":
@@ -145,40 +129,12 @@ func HandleSendPrivateMsg(client callapi.Client, api openapi.OpenAPI, apiv2 open
 		var messageID string
 		// EventID
 		var eventID string
-		if config.GetLazyMessageId() {
-			//由于实现了Params的自定义unmarshell 所以可以类型安全的断言为string
-			messageID = echo.GetLazyMessagesId(UserID)
-			mylog.Printf("GetLazyMessagesId: %v", messageID)
+		if len(message.Params.MessageID.(string)) > 32 {
+			// action里直接传了openid message_id 就用它
+			messageID = message.Params.MessageID.(string)
+			mylog.Println("从action中取私聊发信息对应的message_id:", messageID)
 		}
-		if messageID == "" {
-			if echoStr, ok := message.Echo.(string); ok {
-				messageID = echo.GetMsgIDByKey(echoStr)
-				mylog.Println("echo取私聊发信息对应的message_id:", messageID)
-			}
-		}
-		// 如果messageID仍然为空，尝试使用config.GetAppID和UserID的组合来获取messageID
-		// 如果messageID为空，通过函数获取
-		if messageID == "" {
-			messageID = GetMessageIDByUseridOrGroupid(config.GetAppIDStr(), UserID)
-			mylog.Println("通过GetMessageIDByUserid函数获取的message_id:", messageID)
-		}
-		if messageID == "2000" {
-			messageID = ""
-			mylog.Println("通过lazymsgid发送群私聊主动信息,每月可发送1次")
-			if len(message.Params.UserID.(string)) != 32 {
-				eventID = GetEventIDByUseridOrGroupid(config.GetAppIDStr(), message.Params.UserID)
-			} else {
-				eventID = GetEventIDByUseridOrGroupidv2(config.GetAppIDStr(), message.Params.UserID)
-			}
-			mylog.Printf("尝试获取当前是否有eventID可用,如果有则不消耗主动次数:%v", eventID)
-		}
-		//开发环境用 私聊不可用1000
-		// if config.GetDevMsgID() {
-		// 	messageID = "1000"
-		// }
 		mylog.Println("私聊发信息messageText:", messageText)
-		//mylog.Println("foundItems:", foundItems)
-
 		var singleItem = make(map[string][]string)
 		var imageType, imageUrl string
 		imageCount := 0
@@ -233,15 +189,11 @@ func HandleSendPrivateMsg(client callapi.Client, api openapi.OpenAPI, apiv2 open
 			groupMessage.Timestamp = time.Now().Unix() // 设置时间戳
 
 			// 发送组合消息
-			resp, err = apiv2.PostC2CMessage(context.TODO(), UserID, groupMessage)
+			_, err = apiv2.PostC2CMessage(context.TODO(), UserID, groupMessage)
 			if err != nil {
 				mylog.Printf("发送组合消息失败: %v", err)
 				return "", nil // 或其他错误处理
 			}
-
-			// 发送成功回执
-			retmsg, _ = SendC2CResponse(client, err, &message, resp)
-
 			delete(foundItems, imageType) // 从foundItems中删除已处理的图片项
 			messageText = ""
 		}
@@ -260,14 +212,12 @@ func HandleSendPrivateMsg(client callapi.Client, api openapi.OpenAPI, apiv2 open
 			}
 
 			groupMessage.Timestamp = time.Now().Unix() // 设置时间戳
-			resp, err := apiv2.PostC2CMessage(context.TODO(), UserID, groupMessage)
+			_, err := apiv2.PostC2CMessage(context.TODO(), UserID, groupMessage)
 			if err != nil {
 				mylog.Printf("发送文本私聊信息失败: %v", err)
 				//如果失败 防止进入递归
 				return "", nil
 			}
-			//发送成功回执
-			retmsg, _ = SendC2CResponse(client, err, &message, resp)
 		}
 
 		// 遍历foundItems并发送每种信息
@@ -304,7 +254,7 @@ func HandleSendPrivateMsg(client callapi.Client, api openapi.OpenAPI, apiv2 open
 						}
 
 						// 首次发送私聊 MessageToCreate
-						resp, err = apiv2.PostC2CMessage(context.TODO(), UserID, groupMessage)
+						_, err = apiv2.PostC2CMessage(context.TODO(), UserID, groupMessage)
 						if err != nil {
 							mylog.Printf("发送 MessageToCreate 私聊信息失败: %v", err)
 							// 错误保存到本地
@@ -323,7 +273,7 @@ func HandleSendPrivateMsg(client callapi.Client, api openapi.OpenAPI, apiv2 open
 							// 请求参数 event_id 无效，清空后重试一次
 							groupMessage.EventID = ""
 							//重新为err赋值
-							resp, err = apiv2.PostC2CMessage(context.TODO(), UserID, groupMessage)
+							_, err = apiv2.PostC2CMessage(context.TODO(), UserID, groupMessage)
 							if err != nil {
 								mylog.Printf("发送 MessageToCreate 私聊信息失败 on code 40034025: %v", err)
 								// 错误保存到本地
@@ -335,12 +285,10 @@ func HandleSendPrivateMsg(client callapi.Client, api openapi.OpenAPI, apiv2 open
 							}
 
 						} else if err != nil && strings.Contains(err.Error(), "context deadline exceeded") {
+							mylog.ErrLogToFile("发送 MessageToCreate 私聊信息超时", err.Error())
 							// 仅对超时做有限次重试
-							resp, err = postC2CMessageWithRetry(apiv2, UserID, groupMessage)
+							_, err = postC2CMessageWithRetry(apiv2, UserID, groupMessage)
 						}
-
-						// 发送成功或最终失败后，都尝试回执（err 里能体现成功/失败）
-						retmsg, _ = SendC2CResponse(client, err, &message, resp)
 					}
 					continue // 跳过这个项，继续下一个
 				}
@@ -379,13 +327,11 @@ func HandleSendPrivateMsg(client callapi.Client, api openapi.OpenAPI, apiv2 open
 					}
 					groupMessage.Timestamp = time.Now().Unix() // 设置时间戳
 					//重新为err赋值
-					resp, err = apiv2.PostC2CMessage(context.TODO(), UserID, groupMessage)
+					_, err = apiv2.PostC2CMessage(context.TODO(), UserID, groupMessage)
 					if err != nil {
 						mylog.Printf("发送 %s 私聊信息失败: %v", key, err)
 					}
 				}
-				//发送成功回执
-				retmsg, _ = SendC2CResponse(client, err, &message, resp)
 			}
 		}
 		//这里是pr上来的,我也不明白为什么私聊会出现guild类型
@@ -394,25 +340,6 @@ func HandleSendPrivateMsg(client callapi.Client, api openapi.OpenAPI, apiv2 open
 		retmsg, _ = HandleSendGuildChannelPrivateMsg(client, api, apiv2, message, nil, nil)
 	default:
 		mylog.Printf("Unknown message type: %s", msgType)
-	}
-
-	// 如果递归id不是10(不递归特殊值)
-	if echo.GetMapping(idInt64) != 10 {
-		//重置递归类型
-		if echo.GetMapping(idInt64) <= 0 {
-			echo.AddMsgType(config.GetAppIDStr(), idInt64, "")
-		}
-		echo.AddMapping(idInt64, echo.GetMapping(idInt64)-1)
-
-		//递归3次枚举类型
-		if echo.GetMapping(idInt64) > 0 {
-			tryMessageTypes := []string{"group", "guild", "guild_private"}
-			messageCopy := message // 创建message的副本
-			echo.AddMsgType(config.GetAppIDStr(), idInt64, tryMessageTypes[echo.GetMapping(idInt64)-1])
-			delay := config.GetSendDelay()
-			time.Sleep(time.Duration(delay) * time.Millisecond)
-			retmsg, _ = HandleSendPrivateMsg(client, api, apiv2, messageCopy)
-		}
 	}
 
 	return retmsg, nil
@@ -536,6 +463,7 @@ func postC2CRichMediaMessageWithRetry(
 
 func postC2CMessageWithRetry(apiv2 openapi.OpenAPI, userID string, msg *dto.MessageToCreate) (resp *dto.C2CMessageResponse, err error) {
 	retryCount := 3 // 设置最大重试次数为 3
+	mylog.ErrLogToFile("type", "触发私聊消息重试机制")
 	for i := 0; i < retryCount; i++ {
 		// 递增 msgseq（沿用你群聊那套映射逻辑）
 		msgseq := echo.GetMappingSeq(msg.MsgID)
