@@ -71,7 +71,7 @@ type Action struct {
 	AnChor               int         `json:"anchor"`                             //本字段仅在指令按钮下有效，设置后后会忽略 action.enter 配置。设置为 1 时 ，点击按钮自动唤起启手Q选图器，其他值暂无效果。（仅支持手机端版本 8983+ 的单聊场景，桌面端不支持）
 	Enter                bool        `json:"enter"`                              //指令按钮可用，点击按钮后直接自动发送 data，默认 false。支持版本 8983
 	Reply                bool        `json:"reply"`                              //指令按钮可用，指令是否带引用回复本消息，默认 false。支持版本 8983
-	Modal                ButtonModal `json:"modal"`                              //指令按钮可用，点击按钮后是否弹窗，默认 false。支持版本 8983
+	Modal                ButtonModal `json:"modal"`                              //点击按钮后弹窗相关配置，支持版本 8983，桌面端不支持
 }
 
 // Permission 按纽操作权限

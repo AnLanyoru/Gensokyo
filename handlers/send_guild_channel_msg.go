@@ -491,11 +491,7 @@ func GenerateReplyMessage(id string, foundItems map[string][]string, messageText
 		}
 	} else if mdContent, ok := foundItems["markdown"]; ok && len(mdContent) > 0 {
 		// 解码base64 markdown数据
-		mdData, err := base64.StdEncoding.DecodeString(mdContent[0])
-		if err != nil {
-			mylog.Printf("failed to decode base64 md: %v", err)
-			return nil, false
-		}
+		mdData := []byte(mdContent[0])
 		markdown, keyboard, err := parseMDData(mdData)
 		if err != nil {
 			mylog.Printf("failed to parseMDData: %v", err)

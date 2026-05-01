@@ -944,16 +944,6 @@ func generateGroupMessage(id string, eventid string, foundItems map[string][]str
 					MsgType: 0,
 				}
 			}
-			// 将图片链接缩短 避免 url not allow
-			// if config.GetLotusValue() {
-			// 	// 连接到另一个gensokyo
-			// 	newURL = url.GenerateShortURL(newURL)
-			// } else {
-			// 	// 自己是主节点
-			// 	newURL = url.GenerateShortURL(newURL)
-			// 	// 使用getBaseURL函数来获取baseUrl并与newURL组合
-			// 	newURL = url.GetBaseURL() + "/url/" + newURL
-			// }
 			newpiclink = newURL
 		} else {
 			newpiclink = "http://" + imageURLs[0]
@@ -1299,11 +1289,7 @@ func generateGroupMessage(id string, eventid string, foundItems map[string][]str
 		}
 	} else if mdContent, ok := foundItems["markdown"]; ok && len(mdContent) > 0 {
 		// 解码base64 markdown数据
-		mdData, err := base64.StdEncoding.DecodeString(mdContent[0])
-		if err != nil {
-			mylog.Printf("failed to decode base64 md: %v", err)
-			return nil
-		}
+		mdData := []byte(mdContent[0])
 		markdown, keyboard, err := parseMDData(mdData)
 		if err != nil {
 			mylog.Printf("failed to parseMDData: %v", err)
@@ -1573,16 +1559,6 @@ func generatePrivateMessage(id string, eventid string, foundItems map[string][]s
 					MsgType: 0,
 				}
 			}
-			// 将图片链接缩短 避免 url not allow
-			// if config.GetLotusValue() {
-			// 	// 连接到另一个gensokyo
-			// 	newURL = url.GenerateShortURL(newURL)
-			// } else {
-			// 	// 自己是主节点
-			// 	newURL = url.GenerateShortURL(newURL)
-			// 	// 使用getBaseURL函数来获取baseUrl并与newURL组合
-			// 	newURL = url.GetBaseURL() + "/url/" + newURL
-			// }
 			newpiclink = newURL
 		} else {
 			newpiclink = "http://" + imageURLs[0]
@@ -1657,16 +1633,6 @@ func generatePrivateMessage(id string, eventid string, foundItems map[string][]s
 					MsgType: 0,
 				}
 			}
-			// 将图片链接缩短 避免 url not allow
-			// if config.GetLotusValue() {
-			// 	// 连接到另一个gensokyo
-			// 	newURL = url.GenerateShortURL(newURL)
-			// } else {
-			// 	// 自己是主节点
-			// 	newURL = url.GenerateShortURL(newURL)
-			// 	// 使用getBaseURL函数来获取baseUrl并与newURL组合
-			// 	newURL = url.GetBaseURL() + "/url/" + newURL
-			// }
 			newpiclink = newURL
 		} else {
 			newpiclink = "https://" + imageURLs[0]
@@ -1908,11 +1874,7 @@ func generatePrivateMessage(id string, eventid string, foundItems map[string][]s
 		}
 	} else if mdContent, ok := foundItems["markdown"]; ok && len(mdContent) > 0 {
 		// 解码base64 markdown数据
-		mdData, err := base64.StdEncoding.DecodeString(mdContent[0])
-		if err != nil {
-			mylog.Printf("failed to decode base64 md: %v", err)
-			return nil
-		}
+		mdData := []byte(mdContent[0])
 		markdown, keyboard, err := parseMDData(mdData)
 		if err != nil {
 			mylog.Printf("failed to parseMDData: %v", err)

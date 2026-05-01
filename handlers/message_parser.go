@@ -541,18 +541,70 @@ func SendGuildPrivateResponse(client callapi.Client, err error, message *callapi
 	return string(jsonResponse), nil
 }
 
-// 信息处理函数
+// 公共函数：统一清洗 markdown/ark 内容，直接返回 标准JSON字符串（下游零解码，直接使用）
+// 支持输入：map结构体、原始JSON字符串、带base64://前缀的旧格式
+// 输出：标准格式化的JSON字符串，下游直接 []byte(content) 即可使用
+func processJsonContent(content interface{}) (string, error) {
+	var jsonBytes []byte
+	var err error
+
+	switch v := content.(type) {
+	case map[string]interface{}:
+		// Map 直接序列化为标准 JSON
+		jsonBytes, err = json.Marshal(v)
+		if err != nil {
+			return "", fmt.Errorf("map转JSON失败: %w", err)
+		}
+
+	case string:
+		cleanContent := strings.TrimSpace(v)
+
+		// 兼容旧格式：移除 base64:// 前缀并解码（仅兼容历史数据，不再二次编码）
+		if strings.HasPrefix(cleanContent, "base64://") {
+			cleanContent = strings.TrimPrefix(cleanContent, "base64://")
+			// 解码Base64得到原始JSON
+			decodedBytes, err := base64.StdEncoding.DecodeString(cleanContent)
+			if err != nil {
+				return "", fmt.Errorf("Base64解码失败: %w", err)
+			}
+			cleanContent = string(decodedBytes)
+		}
+
+		// 统一反转义特殊字符
+		cleanContent = strings.ReplaceAll(cleanContent, "&amp;", "&")
+		cleanContent = strings.ReplaceAll(cleanContent, "&#91;", "[")
+		cleanContent = strings.ReplaceAll(cleanContent, "&#93;", "]")
+		cleanContent = strings.ReplaceAll(cleanContent, "&#44;", ",")
+
+		// 校验JSON合法性 + 标准化格式化（保证格式统一）
+		var tempObj interface{}
+		if err = json.Unmarshal([]byte(cleanContent), &tempObj); err != nil {
+			return "", fmt.Errorf("非法JSON格式: %w", err)
+		}
+		// 重新序列化为标准JSON
+		jsonBytes, err = json.Marshal(tempObj)
+		if err != nil {
+			return "", fmt.Errorf("JSON标准化失败: %w", err)
+		}
+
+	default:
+		return "", fmt.Errorf("不支持的内容类型: %T", content)
+	}
+
+	// ✅ 关键修改：直接返回标准JSON字符串，不再做任何Base64编码
+	return string(jsonBytes), nil
+}
 func parseMessageContent(paramsMessage callapi.ParamsContent) (string, map[string][]string) {
 	messageText := ""
-
 	foundItems := make(map[string][]string)
 
 	switch message := paramsMessage.Message.(type) {
 	case string:
-		mylog.Printf("params.message is a string\n")
+		mylog.Printf("纯文本消息\n")
 		messageText = message
+
 	case []interface{}:
-		mylog.Printf("params.message is a slice (segment_type_koishi)\n")
+		mylog.Printf("消息为数组类型\n")
 		for _, segment := range message {
 			segmentMap, ok := segment.(map[string]interface{})
 			if !ok {
@@ -646,100 +698,38 @@ func parseMessageContent(paramsMessage callapi.ParamsContent) (string, map[strin
 
 			case "markdown":
 				mdContent, ok := segmentMap["data"].(map[string]interface{})["data"]
-				if ok {
-					var mdContentEncoded string
-					if mdContentMap, isMap := mdContent.(map[string]interface{}); isMap {
-						mdContentBytes, err := json.Marshal(mdContentMap)
-						if err != nil {
-							mylog.Printf("Error marshaling mdContentMap to JSON:%v", err)
-							continue
-						}
-						mdContentEncoded = base64.StdEncoding.EncodeToString(mdContentBytes)
-					} else if mdContentStr, isString := mdContent.(string); isString {
-						if strings.HasPrefix(mdContentStr, "base64://") {
-							mdContentEncoded = strings.TrimPrefix(mdContentStr, "base64://")
-						} else {
-							mdContentStr = strings.ReplaceAll(mdContentStr, "&amp;", "&")
-							mdContentStr = strings.ReplaceAll(mdContentStr, "&#91;", "[")
-							mdContentStr = strings.ReplaceAll(mdContentStr, "&#93;", "]")
-							mdContentStr = strings.ReplaceAll(mdContentStr, "&#44;", ",")
+				if !ok {
+					mylog.Printf("markdown数据为空")
+					continue
+				}
+				// 直接获取标准JSON字符串，下游无需解码
+				jsonStr, err := processJsonContent(mdContent)
+				if err != nil {
+					mylog.Printf("处理markdown失败: %v", err)
+					continue
+				}
+				foundItems["markdown"] = append(foundItems["markdown"], jsonStr)
 
-							var jsonMap map[string]interface{}
-							if err := json.Unmarshal([]byte(mdContentStr), &jsonMap); err != nil {
-								mylog.Printf("Error unmarshaling string to JSON:%v", err)
-								continue
-							}
-							mdContentBytes, err := json.Marshal(jsonMap)
-							if err != nil {
-								mylog.Printf("Error marshaling jsonMap to JSON:%v", err)
-								continue
-							}
-							mdContentEncoded = base64.StdEncoding.EncodeToString(mdContentBytes)
-						}
-					} else {
-						mylog.Printf("Error marshaling markdown segment wrong type.")
-						continue
-					}
-					foundItems["markdown"] = append(foundItems["markdown"], mdContentEncoded)
-				} else {
-					mylog.Printf("Error: markdown segment data is nil.")
-				}
 			case "ark":
-				// 处理 ark 类型的消息段
 				arkContent, ok := segmentMap["data"].(map[string]interface{})["data"]
-				if ok {
-					var arkContentEncoded string
-					// 检查 arkContent 的类型
-					if arkContentMap, isMap := arkContent.(map[string]interface{}); isMap {
-						arkContentBytes, err := json.Marshal(arkContentMap)
-						if err != nil {
-							mylog.Printf("Error marshaling arkContentMap to JSON:%v", err)
-							continue
-						}
-						// 编码为 Base64 字符串
-						arkContentEncoded = base64.StdEncoding.EncodeToString(arkContentBytes)
-					} else if arkContentStr, isString := arkContent.(string); isString {
-						// 检查是否为 Base64 编码的字符串
-						if strings.HasPrefix(arkContentStr, "base64://") {
-							// 去掉 "base64://" 头部
-							arkContentEncoded = strings.TrimPrefix(arkContentStr, "base64://")
-						} else {
-							// 特殊字符反转义
-							arkContentStr = strings.ReplaceAll(arkContentStr, "&amp;", "&")
-							arkContentStr = strings.ReplaceAll(arkContentStr, "&#91;", "[")
-							arkContentStr = strings.ReplaceAll(arkContentStr, "&#93;", "]")
-							arkContentStr = strings.ReplaceAll(arkContentStr, "&#44;", ",")
-							var jsonMap map[string]interface{}
-							// 反序列化字符串为 JSON 对象
-							if err := json.Unmarshal([]byte(arkContentStr), &jsonMap); err != nil {
-								mylog.Printf("Error unmarshaling string to JSON:%v", err)
-								continue
-							}
-							// 将 JSON 对象序列化为字节数组
-							arkContentBytes, err := json.Marshal(jsonMap)
-							if err != nil {
-								mylog.Printf("Error marshaling jsonMap to JSON:%v", err)
-								continue
-							}
-							// 将字节数组编码为 Base64 字符串
-							arkContentEncoded = base64.StdEncoding.EncodeToString(arkContentBytes)
-						}
-					} else {
-						mylog.Printf("Error marshaling ark segment wrong type.")
-						continue
-					}
-					foundItems["ark"] = append(foundItems["ark"], arkContentEncoded)
-				} else {
-					mylog.Printf("Error: ark segment data is nil.")
+				if !ok {
+					mylog.Printf("ark数据为空")
+					continue
 				}
+				// 直接获取标准JSON字符串，下游无需解码
+				jsonStr, err := processJsonContent(arkContent)
+				if err != nil {
+					mylog.Printf("处理ark失败: %v", err)
+					continue
+				}
+				foundItems["ark"] = append(foundItems["ark"], jsonStr)
 
 			default:
-				mylog.Printf("Unhandled segment type: %s", segmentType)
+				mylog.Printf("未处理的消息类型: %s", segmentType)
 			}
-
 			messageText += segmentContent
-
 		}
+
 	case map[string]interface{}:
 		mylog.Printf("params.message is a map (segment_type_trss)\n")
 		messageType, _ := message["type"].(string)
@@ -826,82 +816,32 @@ func parseMessageContent(paramsMessage callapi.ParamsContent) (string, map[strin
 
 		case "markdown":
 			mdContent, ok := message["data"].(map[string]interface{})["data"]
-			if ok {
-				var mdContentEncoded string
-				if mdContentMap, isMap := mdContent.(map[string]interface{}); isMap {
-					mdContentBytes, err := json.Marshal(mdContentMap)
-					if err != nil {
-						mylog.Printf("Error marshaling mdContentMap to JSON:%v", err)
-					}
-					mdContentEncoded = base64.StdEncoding.EncodeToString(mdContentBytes)
-				} else if mdContentStr, isString := mdContent.(string); isString {
-					if strings.HasPrefix(mdContentStr, "base64://") {
-						mdContentEncoded = strings.TrimPrefix(mdContentStr, "base64://")
-					} else {
-						mdContentStr = strings.ReplaceAll(mdContentStr, "&amp;", "&")
-						mdContentStr = strings.ReplaceAll(mdContentStr, "&#91;", "[")
-						mdContentStr = strings.ReplaceAll(mdContentStr, "&#93;", "]")
-						mdContentStr = strings.ReplaceAll(mdContentStr, "&#44;", ",")
-						var jsonMap map[string]interface{}
-						if err := json.Unmarshal([]byte(mdContentStr), &jsonMap); err != nil {
-							mylog.Printf("Error unmarshaling string to JSON:%v", err)
-						}
-						mdContentBytes, err := json.Marshal(jsonMap)
-						if err != nil {
-							mylog.Printf("Error marshaling jsonMap to JSON:%v", err)
-						}
-						mdContentEncoded = base64.StdEncoding.EncodeToString(mdContentBytes)
-					}
-				} else {
-					mylog.Printf("Error: markdown content has an unexpected type.")
-				}
-				foundItems["markdown"] = append(foundItems["markdown"], mdContentEncoded)
-			} else {
-				mylog.Printf("Error: markdown segment data is nil.")
+			if !ok {
+				mylog.Printf("markdown数据为空")
 			}
+			jsonStr, err := processJsonContent(mdContent)
+			if err != nil {
+				mylog.Printf("处理markdown失败: %v", err)
+			}
+			foundItems["markdown"] = append(foundItems["markdown"], jsonStr)
+
 		case "ark":
 			arkContent, ok := message["data"].(map[string]interface{})["data"]
-			if ok {
-				var arkContentEncoded string
-				if arkContentMap, isMap := arkContent.(map[string]interface{}); isMap {
-					arkContentBytes, err := json.Marshal(arkContentMap)
-					if err != nil {
-						mylog.Printf("Error marshaling mdContentMap to JSON:%v", err)
-					}
-					arkContentEncoded = base64.StdEncoding.EncodeToString(arkContentBytes)
-				} else if arkContentStr, isString := arkContent.(string); isString {
-					if strings.HasPrefix(arkContentStr, "base64://") {
-						arkContentEncoded = strings.TrimPrefix(arkContentStr, "base64://")
-					} else {
-						arkContentStr = strings.ReplaceAll(arkContentStr, "&amp;", "&")
-						arkContentStr = strings.ReplaceAll(arkContentStr, "&#91;", "[")
-						arkContentStr = strings.ReplaceAll(arkContentStr, "&#93;", "]")
-						arkContentStr = strings.ReplaceAll(arkContentStr, "&#44;", ",")
-						var jsonMap map[string]interface{}
-						if err := json.Unmarshal([]byte(arkContentStr), &jsonMap); err != nil {
-							mylog.Printf("Error unmarshaling string to JSON:%v", err)
-						}
-						mdContentBytes, err := json.Marshal(jsonMap)
-						if err != nil {
-							mylog.Printf("Error marshaling jsonMap to JSON:%v", err)
-						}
-						arkContentEncoded = base64.StdEncoding.EncodeToString(mdContentBytes)
-					}
-				} else {
-					mylog.Printf("Error: ark content has an unexpected type.")
-				}
-				foundItems["ark"] = append(foundItems["ark"], arkContentEncoded)
-			} else {
-				mylog.Printf("Error: ark segment data is nil.")
+			if !ok {
+				mylog.Printf("ark数据为空")
 			}
-
+			jsonStr, err := processJsonContent(arkContent)
+			if err != nil {
+				mylog.Printf("处理ark失败: %v", err)
+			}
+			foundItems["ark"] = append(foundItems["ark"], jsonStr)
 		default:
-			mylog.Printf("Unhandled message type: %s", messageType)
+			mylog.Printf("不支持的消息格式: %s", messageType)
 		}
-
 	default:
-		mylog.Println("Unsupported message format: params.message field is not a string, map or slice")
+		mylog.Println("上报数据格式不受支持")
 	}
+
 	return messageText, foundItems
 }
 
