@@ -26,13 +26,10 @@ import (
 	"github.com/hoshinonyaruko/gensokyo/images"
 	"github.com/hoshinonyaruko/gensokyo/mylog"
 	"github.com/hoshinonyaruko/gensokyo/structs"
-	"github.com/hoshinonyaruko/gensokyo/url"
-	"github.com/skip2/go-qrcode"
 	"github.com/tencent-connect/botgo/dto"
 	"github.com/tencent-connect/botgo/dto/keyboard"
 	"github.com/tencent-connect/botgo/openapi"
 	"github.com/tidwall/gjson"
-	"mvdan.cc/xurls" //xurls是一个从文本提取url的库 适用于多种场景
 )
 
 var BotID string
