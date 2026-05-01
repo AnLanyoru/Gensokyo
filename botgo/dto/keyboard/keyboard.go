@@ -53,6 +53,13 @@ type RenderData struct {
 	Style        int    `json:"style,omitempty"`         // 按钮样式，0：灰色线框，1：蓝色线框
 }
 
+// ButtonModal  按纽弹窗
+type ButtonModal struct {
+	Content      string `json:"content,omitempty"`      // 弹窗内容
+	Confirm_text string `json:"confirm_text,omitempty"` // 确认按钮文本
+	Cancel_text  string `json:"cancel_text,omitempty"`  // 取消按钮文本
+}
+
 // Action 按纽点击操作
 type Action struct {
 	Type                 ActionType  `json:"type,omitempty"`                     // 操作类型 设置 0 跳转按钮：http 或 小程序 客户端识别 scheme，设置 1 回调按钮：回调后台接口, data 传给后台，设置 2 指令按钮：自动在输入框插入 @bot data
@@ -64,6 +71,7 @@ type Action struct {
 	AnChor               int         `json:"anchor"`                             //本字段仅在指令按钮下有效，设置后后会忽略 action.enter 配置。设置为 1 时 ，点击按钮自动唤起启手Q选图器，其他值暂无效果。（仅支持手机端版本 8983+ 的单聊场景，桌面端不支持）
 	Enter                bool        `json:"enter"`                              //指令按钮可用，点击按钮后直接自动发送 data，默认 false。支持版本 8983
 	Reply                bool        `json:"reply"`                              //指令按钮可用，指令是否带引用回复本消息，默认 false。支持版本 8983
+	Modal                ButtonModal `json:"modal"`                              //指令按钮可用，点击按钮后是否弹窗，默认 false。支持版本 8983
 }
 
 // Permission 按纽操作权限

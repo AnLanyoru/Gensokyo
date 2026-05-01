@@ -392,6 +392,11 @@ func (p *Processors) ProcessC2CMessage(data *dto.WSC2CMessageData) error {
 				log.Fatalf("Error storing ID: %v", err)
 			}
 			messageID := int(messageID64)
+			messageTime, err := data.Timestamp.Time()
+			if err != nil {
+				log.Fatalf("Error original timestamp: %v", err)
+				messageTime = time.Now()
+			}
 			groupMsg := OnebotGroupMessage{
 				RawMessage:    messageText,
 				Message:       messageText,
@@ -411,7 +416,7 @@ func (p *Processors) ProcessC2CMessage(data *dto.WSC2CMessageData) error {
 					Level:  "0",
 				},
 				SubType: "normal",
-				Time:    time.Now().Unix(),
+				Time:    messageTime.Unix(),
 			}
 
 			//增强配置

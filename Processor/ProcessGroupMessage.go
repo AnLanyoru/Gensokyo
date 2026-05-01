@@ -282,6 +282,11 @@ func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData) error {
 		if err != nil {
 			mylog.Errorf("Error storing ID: %v", err)
 		}
+		messageTime, err := data.Timestamp.Time()
+		if err != nil {
+			log.Fatalf("Error original timestamp: %v", err)
+			messageTime = time.Now()
+		}
 		groupMsgS := OnebotGroupMessage{
 			RawMessage:    messageText,
 			Message:       segmentedMessages,
@@ -300,7 +305,7 @@ func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData) error {
 				Level:  "0",
 			},
 			SubType: "normal",
-			Time:    time.Now().Unix(),
+			Time:    messageTime.UnixMilli(),
 		}
 		// 增强配置
 		if !config.GetNativeOb11() {

@@ -62,11 +62,8 @@ func NoMoreDoubleClick() error {
 	}
 	f, err := os.OpenFile("gensokyo.bat", os.O_CREATE|os.O_RDWR, 0o666)
 	if err != nil {
-		return err
-	}
-	if err != nil {
 		fmt.Printf("打开gensokyo.bat失败: %v", err)
-		return nil
+		return err
 	}
 	_ = f.Truncate(0)
 
@@ -78,7 +75,7 @@ func NoMoreDoubleClick() error {
 		return nil
 	}
 	f.Close()
-	boxW(0, "安全启动脚本已生成，请双击gensokyo.bat启动", "提示", 0x00000040|0x00000000)
+	boxW(0, "安全启动脚本已生成，请双击gensokyo.bat启动", "提示", 0x00000040)
 	return nil
 }
 

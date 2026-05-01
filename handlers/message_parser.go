@@ -555,17 +555,6 @@ func parseMessageContent(paramsMessage callapi.ParamsContent, message callapi.Ac
 	case string:
 		mylog.Printf("params.message is a string\n")
 		messageText = message
-		// 直接应用替换规则
-		if config.GetEnableChangeWord() {
-			messageText = acnode.CheckWordOUT(messageText)
-		}
-		if paramsMessage.GroupID == nil {
-			// 解析[CQ:avatar,qq=123456]
-			messageText = ProcessCQAvatarNoGroupID(messageText)
-		} else {
-			// 解析[CQ:avatar,qq=123456]
-			messageText = ProcessCQAvatar(paramsMessage.GroupID.(string), messageText)
-		}
 	case []interface{}:
 		mylog.Printf("params.message is a slice (segment_type_koishi)\n")
 		for _, segment := range message {
@@ -917,216 +906,11 @@ func parseMessageContent(paramsMessage callapi.ParamsContent, message callapi.Ac
 	default:
 		mylog.Println("Unsupported message format: params.message field is not a string, map or slice")
 	}
-
-	if paramsMessage.GroupID == nil {
-		//处理at
-		messageText = transformMessageTextAtNoGroupID(messageText)
-	} else {
-		//处理at
-		messageText = transformMessageTextAt(messageText, paramsMessage.GroupID.(string))
-	}
-
-	// 当匹配到复古cq码上报类型,使用低效率正则.
-	if _, ok := paramsMessage.Message.(string); ok {
-		// 正则表达式部分
-		var localImagePattern *regexp.Regexp
-		var localRecordPattern *regexp.Regexp
-		if runtime.GOOS == "windows" {
-			localImagePattern = regexp.MustCompile(`\[CQ:image,file=file:///([^\]]+?)\]`)
-		} else {
-			localImagePattern = regexp.MustCompile(`\[CQ:image,file=file://([^\]]+?)\]`)
-		}
-		if runtime.GOOS == "windows" {
-			localRecordPattern = regexp.MustCompile(`\[CQ:record,file=file:///([^\]]+?)\]`)
-		} else {
-			localRecordPattern = regexp.MustCompile(`\[CQ:record,file=file://([^\]]+?)\]`)
-		}
-		httpUrlImagePattern := regexp.MustCompile(`\[CQ:image,file=http://(.+?)\]`)
-		httpsUrlImagePattern := regexp.MustCompile(`\[CQ:image,file=https://(.+?)\]`)
-		base64ImagePattern := regexp.MustCompile(`\[CQ:image,file=base64://(.+?)\]`)
-		base64RecordPattern := regexp.MustCompile(`\[CQ:record,file=base64://(.+?)\]`)
-		httpUrlRecordPattern := regexp.MustCompile(`\[CQ:record,file=http://(.+?)\]`)
-		httpsUrlRecordPattern := regexp.MustCompile(`\[CQ:record,file=https://(.+?)\]`)
-		httpUrlVideoPattern := regexp.MustCompile(`\[CQ:video,file=http://(.+?)\]`)
-		httpsUrlVideoPattern := regexp.MustCompile(`\[CQ:video,file=https://(.+?)\]`)
-		mdPattern := regexp.MustCompile(`\[CQ:markdown,data=base64://(.+?)\]`)
-		qqMusicPattern := regexp.MustCompile(`\[CQ:music,type=qq,id=(\d+)\]`)
-
-		patterns := []struct {
-			key     string
-			pattern *regexp.Regexp
-		}{
-			{"local_image", localImagePattern},
-			{"url_image", httpUrlImagePattern},
-			{"url_images", httpsUrlImagePattern},
-			{"base64_image", base64ImagePattern},
-			{"base64_record", base64RecordPattern},
-			{"local_record", localRecordPattern},
-			{"url_record", httpUrlRecordPattern},
-			{"url_records", httpsUrlRecordPattern},
-			{"markdown", mdPattern},
-			{"qqmusic", qqMusicPattern},
-			{"url_video", httpUrlVideoPattern},
-			{"url_videos", httpsUrlVideoPattern},
-		}
-
-		for _, pattern := range patterns {
-			matches := pattern.pattern.FindAllStringSubmatch(messageText, -1)
-			for _, match := range matches {
-				if len(match) > 1 {
-					foundItems[pattern.key] = append(foundItems[pattern.key], match[1])
-				}
-			}
-			// 移动替换操作到这里，确保所有匹配都被处理后再进行替换
-			messageText = pattern.pattern.ReplaceAllString(messageText, "")
-		}
-	}
-
-	//最后再处理Url
-	messageText = transformMessageTextUrl(messageText, message, client, api, apiv2)
-
-	// for key, items := range foundItems {
-	// 	fmt.Printf("Key: %s, Items: %v\n", key, items)
-	// }
 	return messageText, foundItems
 }
 
 func isIPAddress(address string) bool {
 	return net.ParseIP(address) != nil
-}
-
-// at处理
-func transformMessageTextAt(messageText string, groupid string) string {
-	// DoNotReplaceAppid=false(默认频道bot,需要自己at自己时,否则改成true)
-	if !config.GetDoNotReplaceAppid() {
-		// 首先，将AppID替换为BotID
-		messageText = strings.ReplaceAll(messageText, AppID, BotID)
-	}
-
-	// 去除所有[CQ:reply,id=数字] todo 更好的处理办法
-	replyRE := regexp.MustCompile(`\[CQ:reply,id=\d+\]`)
-	messageText = replyRE.ReplaceAllString(messageText, "")
-
-	// 使用正则表达式来查找所有[CQ:at,qq=数字]的模式
-	re := regexp.MustCompile(`\[CQ:at,qq=(\d+)\]`)
-	messageText = re.ReplaceAllStringFunc(messageText, func(m string) string {
-		submatches := re.FindStringSubmatch(m)
-		if len(submatches) > 1 {
-			var realUserID string
-			var err error
-			if config.GetIdmapPro() {
-				_, realUserID, err = idmap.RetrieveRowByIDv2Pro(groupid, submatches[1])
-			} else {
-				realUserID, err = idmap.RetrieveRowByIDv2(submatches[1])
-			}
-			if err != nil {
-				// 如果出错，也替换成相应的格式，但使用原始QQ号
-				mylog.Printf("Error retrieving user ID: %v", err)
-				return "<@!" + submatches[1] + ">"
-			}
-
-			// 在这里检查 GetRemoveBotAtGroup 和 realUserID 的长度
-			if config.GetRemoveBotAtGroup() && len(realUserID) == 32 {
-				return ""
-			}
-
-			return "<@!" + realUserID + ">"
-		}
-		return m
-	})
-	return messageText
-}
-
-// at处理
-func transformMessageTextAtNoGroupID(messageText string) string {
-	// DoNotReplaceAppid=false(默认频道bot,需要自己at自己时,否则改成true)
-	if !config.GetDoNotReplaceAppid() {
-		// 首先，将AppID替换为BotID
-		messageText = strings.ReplaceAll(messageText, AppID, BotID)
-	}
-
-	// 去除所有[CQ:reply,id=数字] todo 更好的处理办法
-	replyRE := regexp.MustCompile(`\[CQ:reply,id=\d+\]`)
-	messageText = replyRE.ReplaceAllString(messageText, "")
-
-	// 使用正则表达式来查找所有[CQ:at,qq=数字]的模式
-	re := regexp.MustCompile(`\[CQ:at,qq=(\d+)\]`)
-	messageText = re.ReplaceAllStringFunc(messageText, func(m string) string {
-		submatches := re.FindStringSubmatch(m)
-		if len(submatches) > 1 {
-			var realUserID string
-			var err error
-			if config.GetIdmapPro() {
-				// 这是个魔法数 代表私聊
-				_, realUserID, err = idmap.RetrieveRowByIDv2Pro("690426430", submatches[1])
-			} else {
-				realUserID, err = idmap.RetrieveRowByIDv2(submatches[1])
-			}
-			if err != nil {
-				// 如果出错，也替换成相应的格式，但使用原始QQ号
-				mylog.Printf("Error retrieving user ID: %v", err)
-				return "<@!" + submatches[1] + ">"
-			}
-
-			// 在这里检查 GetRemoveBotAtGroup 和 realUserID 的长度
-			if config.GetRemoveBotAtGroup() && len(realUserID) == 32 {
-				return ""
-			}
-
-			return "<@!" + realUserID + ">"
-		}
-		return m
-	})
-	return messageText
-}
-
-// 链接处理
-func transformMessageTextUrl(messageText string, message callapi.ActionMessage, client callapi.Client, api openapi.OpenAPI, apiv2 openapi.OpenAPI) string {
-	// 是否处理url
-	if config.GetTransferUrl() {
-		// 判断服务器地址是否是IP地址
-		serverAddress := config.GetServer_dir()
-		isIP := isIPAddress(serverAddress)
-		VisualIP := config.GetVisibleIP()
-
-		// 使用xurls来查找和替换所有的URL
-		messageText = xurls.Relaxed.ReplaceAllStringFunc(messageText, func(originalURL string) string {
-			// 当服务器地址是IP地址且GetVisibleIP为false时，替换URL为空
-			if isIP && !VisualIP {
-				return ""
-			}
-
-			// 如果启用了URL到QR码的转换
-			if config.GetUrlToQrimage() {
-				// 将URL转换为QR码的字节形式
-				qrCodeGenerator, _ := qrcode.New(originalURL, qrcode.High)
-				qrCodeGenerator.DisableBorder = true
-				qrSize := config.GetQrSize()
-				pngBytes, _ := qrCodeGenerator.PNG(qrSize)
-				//pngBytes 二维码图片的字节数据
-				base64Image := base64.StdEncoding.EncodeToString(pngBytes)
-				picmsg := processActionMessageWithBase64PicReplace(base64Image, message)
-				ret := callapi.CallAPIFromDict(client, api, apiv2, picmsg)
-				mylog.Printf("发送url转图片结果:%v", ret)
-				// 从文本中去除原始URL
-				return "" // 返回空字符串以去除URL
-			}
-
-			// 根据配置处理URL
-			if config.GetLotusValue() {
-				// 连接到另一个gensokyo
-				mylog.Printf("转换url:%v", originalURL)
-				shortURL := url.GenerateShortURL(originalURL)
-				return shortURL
-			} else {
-				// 自己是主节点
-				shortURL := url.GenerateShortURL(originalURL)
-				// 使用getBaseURL函数来获取baseUrl并与shortURL组合
-				return url.GetBaseURL() + "/url/" + shortURL
-			}
-		})
-	}
-	return messageText
 }
 
 // processActionMessageWithBase64PicReplace 将原有的callapi.ActionMessage内容替换为一个base64图片
@@ -1764,11 +1548,7 @@ func ConvertMapToJSONString(m map[string]interface{}) (string, error) {
 func parseMDData(mdData []byte) (*dto.Markdown, *keyboard.MessageKeyboard, error) {
 	// 定义一个用于解析 JSON 的临时结构体
 	var temp struct {
-		Markdown struct {
-			CustomTemplateID *string               `json:"custom_template_id,omitempty"`
-			Params           []*dto.MarkdownParams `json:"params,omitempty"`
-			Content          string                `json:"content,omitempty"`
-		} `json:"markdown,omitempty"`
+		Markdown dto.Markdown
 		Keyboard struct {
 			ID      string                   `json:"id,omitempty"`
 			Content *keyboard.CustomKeyboard `json:"content,omitempty"`
@@ -1780,22 +1560,7 @@ func parseMDData(mdData []byte) (*dto.Markdown, *keyboard.MessageKeyboard, error
 	if err := json.Unmarshal(mdData, &temp); err != nil {
 		return nil, nil, err
 	}
-
-	// 处理 Markdown
-	var md *dto.Markdown
-	if temp.Markdown.CustomTemplateID != nil {
-		// 处理模板 Markdown
-		md = &dto.Markdown{
-			CustomTemplateID: *temp.Markdown.CustomTemplateID,
-			Params:           temp.Markdown.Params,
-			Content:          temp.Markdown.Content,
-		}
-	} else if temp.Markdown.Content != "" {
-		// 处理自定义 Markdown
-		md = &dto.Markdown{
-			Content: temp.Markdown.Content,
-		}
-	}
+	md := &temp.Markdown
 
 	// 处理 Keyboard
 	var kb *keyboard.MessageKeyboard
