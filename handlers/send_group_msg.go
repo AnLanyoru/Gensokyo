@@ -168,13 +168,11 @@ func HandleSendGroupMsg(client callapi.Client, api openapi.OpenAPI, apiv2 openap
 			}
 		}
 		if messageID == "" {
-			if echoStr, ok := message.Echo.(string); ok {
-				messageID = echo.GetMsgIDByKey(echoStr)
-				mylog.Println("echo取群组发信息对应的message_id:", messageID)
-			}
+			messageID = message.Params.MessageID.(string)
+			mylog.Println("从action中取群组发信息对应的message_id:", messageID)
 			if messageID == "" {
-				messageID = message.Params.MessageID.(string)
-				mylog.Println("从action中取群组发信息对应的message_id:", messageID)
+				eventID = message.Params.EventID
+				mylog.Println("没有msg_id从action中取群组发信息对应的event_id:", eventID)
 			}
 		}
 
@@ -241,26 +239,6 @@ func HandleSendGroupMsg(client callapi.Client, api openapi.OpenAPI, apiv2 openap
 				// 如果 UserID 是 nil，可以在这里处理，例如记录日志或采取其他措施
 				mylog.Println("UserID 为 nil,跳过 GetMessageIDByUseridAndGroupid 调用")
 			}
-		}
-		// 如果messageID为空，通过函数获取
-		if messageID == "" {
-			messageID = GetMessageIDByUseridOrGroupid(config.GetAppIDStr(), message.Params.GroupID)
-			mylog.Println("通过GetMessageIDByUseridOrGroupid函数获取的message_id:", message.Params.GroupID, messageID)
-		}
-		//开发环境用 1000在群里无效
-		// if config.GetDevMsgID() {
-		// 	messageID = "1000"
-		// }
-		if messageID == "2000" {
-			messageID = ""
-			mylog.Println("通过lazymessage_id模式发送群聊/频道主动信息,群聊每月仅4次机会,如果本信息非主动推送信息,请提交issue")
-			// 不使用stringob11的
-			if !config.GetStringOb11() {
-				eventID = GetEventIDByUseridOrGroupid(config.GetAppIDStr(), message.Params.GroupID)
-			} else {
-				eventID = GetEventIDByUseridOrGroupidv2(config.GetAppIDStr(), message.Params.GroupID)
-			}
-			mylog.Printf("尝试获取当前是否有eventID可用,如果有则不消耗主动次数:%v", eventID)
 		}
 		mylog.Printf("群组发信息使用messageID:[%v]", messageID)
 		var singleItem = make(map[string][]string)

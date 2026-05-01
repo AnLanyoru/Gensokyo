@@ -73,6 +73,7 @@ type ParamsContent struct {
 	GuildID     interface{} `json:"guild_id,omitempty"`
 	GroupID     interface{} `json:"group_id,omitempty"`     // 每一种onebotv11实现的字段类型都可能不同
 	MessageID   interface{} `json:"message_id,omitempty"`   // 用于撤回信息
+	EventID     string      `json:"event_id,omitempty"`     // 用于回复回调消息
 	MessageType string      `json:"message_type,omitempty"` // 标识消息类型
 	Message     interface{} `json:"message,omitempty"`      // 这里使用interface{}因为它可能是多种类型
 	Messages    interface{} `json:"messages,omitempty"`     // 坑爹转发信息
