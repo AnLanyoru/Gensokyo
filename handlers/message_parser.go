@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"path/filepath"
 	"regexp"
@@ -543,7 +542,7 @@ func SendGuildPrivateResponse(client callapi.Client, err error, message *callapi
 }
 
 // 信息处理函数
-func parseMessageContent(paramsMessage callapi.ParamsContent, message callapi.ActionMessage, client callapi.Client, api openapi.OpenAPI, apiv2 openapi.OpenAPI) (string, map[string][]string) {
+func parseMessageContent(paramsMessage callapi.ParamsContent) (string, map[string][]string) {
 	messageText := ""
 
 	foundItems := make(map[string][]string)
@@ -904,22 +903,6 @@ func parseMessageContent(paramsMessage callapi.ParamsContent, message callapi.Ac
 		mylog.Println("Unsupported message format: params.message field is not a string, map or slice")
 	}
 	return messageText, foundItems
-}
-
-func isIPAddress(address string) bool {
-	return net.ParseIP(address) != nil
-}
-
-// processActionMessageWithBase64PicReplace 将原有的callapi.ActionMessage内容替换为一个base64图片
-func processActionMessageWithBase64PicReplace(base64Image string, message callapi.ActionMessage) callapi.ActionMessage {
-	newMessage := createCQImageMessage(base64Image)
-	message.Params.Message = newMessage
-	return message
-}
-
-// createCQImageMessage 从 base64 编码的图片创建 CQ 码格式的消息
-func createCQImageMessage(base64Image string) string {
-	return "[CQ:image,file=base64://" + base64Image + "]"
 }
 
 // 处理at和其他定形文到onebotv11格式(cq码)

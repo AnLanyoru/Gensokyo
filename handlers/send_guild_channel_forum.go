@@ -85,7 +85,7 @@ func HandleSendGuildChannelForum(client callapi.Client, api openapi.OpenAPI, api
 	//原生guild信息
 	case "forum":
 		params := message.Params
-		messageText, foundItems := parseMessageContent(params, message, client, api, apiv2)
+		messageText, foundItems := parseMessageContent(params)
 
 		channelID := params.ChannelID
 		// 使用 echo 获取消息ID

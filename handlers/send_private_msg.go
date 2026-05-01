@@ -123,7 +123,7 @@ func HandleSendPrivateMsg(client callapi.Client, api openapi.OpenAPI, apiv2 open
 		}
 
 		// 解析消息内容
-		messageText, foundItems := parseMessageContent(message.Params, message, client, api, apiv2)
+		messageText, foundItems := parseMessageContent(message.Params)
 
 		// 使用 echo 获取消息ID
 		var messageID string

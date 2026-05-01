@@ -141,7 +141,7 @@ func HandleSendGroupMsg(client callapi.Client, api openapi.OpenAPI, apiv2 openap
 	switch msgType {
 	case "group":
 		// 解析消息内容
-		messageText, foundItems := parseMessageContent(message.Params, message, client, api, apiv2)
+		messageText, foundItems := parseMessageContent(message.Params)
 		var SSM bool
 		// 使用 echo 获取消息ID
 		var messageID string
