@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,7 +16,6 @@ import (
 	"github.com/hoshinonyaruko/gensokyo/handlers"
 	"github.com/hoshinonyaruko/gensokyo/idmap"
 	"github.com/hoshinonyaruko/gensokyo/mylog"
-	"github.com/hoshinonyaruko/gensokyo/unioncache"
 	"github.com/tencent-connect/botgo/dto"
 	"github.com/tencent-connect/botgo/openapi"
 	"github.com/tencent-connect/botgo/websocket/client"
@@ -30,7 +30,6 @@ var (
 // ProcessInlineSearch 处理内联查询
 func (p *Processors) ProcessInlineSearch(data *dto.WSInteractionData) error {
 	// 转换appid
-	var userid64 int64
 	var GroupID64 int64
 	var LongGroupID64 int64
 	var LongUserID64 int64
@@ -75,53 +74,16 @@ func (p *Processors) ProcessInlineSearch(data *dto.WSInteractionData) error {
 			DelayedPutInteraction(p.Api, data.ID, fromuid, fromgid)
 		}
 	}
-
-	if config.GetIdmapPro() {
-		//将真实id转为int userid64
-		GroupID64, userid64, err = idmap.StoreIDv2Pro(fromgid, fromuid)
-		if err != nil {
-			mylog.Errorf("Error storing ID: %v", err)
-		}
-		// 当哈希碰撞 因为获取时候是用的非idmap的get函数
-		LongGroupID64, _ = idmap.StoreIDv2(fromgid)
-		LongUserID64, _ = idmap.StoreIDv2(fromuid)
-		if !config.GetHashIDValue() {
-			mylog.Fatalf("避坑日志:你开启了高级id转换,请设置hash_id为true,并且删除idmaps并重启")
-		}
-	} else {
-		// 映射str的GroupID到int
-		GroupID64, err = idmap.StoreIDv2(fromgid)
-		if err != nil {
-			mylog.Errorf("failed to convert ChannelID to int: %v", err)
-			return nil
-		}
-		// 映射str的userid到int
-		userid64, err = idmap.StoreIDv2(fromuid)
-		if err != nil {
-			mylog.Printf("Error storing ID: %v", err)
-			return nil
-		}
+	//将真实id转为int userid64
+	userid64, err := idmap.GenerateRowID(fromuid, 9)
+	if err != nil {
+		mylog.Errorf("Error storing ID: %v", err)
 	}
 	var selfid64 int64
 	if config.GetUseUin() {
 		selfid64 = config.GetUinint64()
 	} else {
 		selfid64 = int64(p.Settings.AppID)
-	}
-
-	var platform string
-	if config.GetUnionID() {
-		platform = "unionqq"
-
-		// 用 GroupMemberOpenID 作为“原始ID”去查 unionOpenID
-		// 成功则把 GroupMemberOpenID 赋值为 unionOpenID
-		if data.GroupMemberOpenID != "" {
-			if u, ok := unioncache.Union(data.GroupMemberOpenID); ok && u != "" {
-				data.GroupMemberOpenID = u
-			}
-		}
-	} else {
-		platform = "qq"
 	}
 
 	if !config.GetGlobalInteractionToMessage() {
@@ -325,16 +287,21 @@ func (p *Processors) ProcessInlineSearch(data *dto.WSInteractionData) error {
 				} else {
 					selfid64 = int64(p.Settings.AppID)
 				}
-				//mylog.Printf("回调测试-interaction:%v\n", segmentedMessages)
-				groupMsg := OnebotGroupMessageS{
-					RawMessage:  data.Data.Resolved.ButtonData,
-					Message:     segmentedMessages,
-					MessageID:   data.EventID,
-					GroupID:     data.GroupOpenID,
-					MessageType: "group",
-					PostType:    "message",
-					SelfID:      selfid64,
-					UserID:      data.GroupMemberOpenID,
+				messageTime, err := time.Parse(time.RFC3339, data.Timestamp)
+				if err != nil {
+					log.Fatalf("Error original timestamp: %v", err)
+					messageTime = time.Now()
+				}
+				groupMsg := OnebotGroupMessage{
+					RawMessage:    data.Data.Resolved.ButtonData,
+					Message:       segmentedMessages,
+					MessageID:     0, // 这个事件没有真正的messageID,可以考虑用eventID或者不填
+					RealMessageID: data.ID,
+					GroupID:       GroupID64,
+					MessageType:   "group",
+					PostType:      "message",
+					SelfID:        selfid64,
+					UserID:        userid64,
 					Sender: Sender{
 						UserID: userid64,
 						Sex:    "0",
@@ -342,16 +309,14 @@ func (p *Processors) ProcessInlineSearch(data *dto.WSInteractionData) error {
 						Area:   "0",
 						Level:  "0",
 					},
-					SubType:  "normal",
-					Time:     time.Now().Unix(),
-					Platform: platform,
+					SubType: "button",
+					Time:    messageTime.Unix(),
 				}
 				//增强配置
 				if !config.GetNativeOb11() {
 					groupMsg.RealMessageType = "group"
 					groupMsg.RealGroupID = data.GroupOpenID
 					groupMsg.RealUserID = data.GroupMemberOpenID
-					groupMsg.Avatar, _ = GenerateAvatarURLV2(data.GroupMemberOpenID)
 				}
 				//根据条件判断是否增加nick和card
 				var CaN = config.GetCardAndNick()
@@ -369,13 +334,7 @@ func (p *Processors) ProcessInlineSearch(data *dto.WSInteractionData) error {
 				masterIDs := config.GetMasterID()
 
 				// 判断userid64是否在masterIDs数组里
-				isMaster := false
-				for _, id := range masterIDs {
-					if strconv.FormatInt(userid64, 10) == id {
-						isMaster = true
-						break
-					}
-				}
+				isMaster := slices.Contains(masterIDs, strconv.FormatInt(userid64, 10))
 
 				// 根据isMaster的值为groupMsg的Sender赋值role字段
 				if isMaster {
@@ -384,54 +343,19 @@ func (p *Processors) ProcessInlineSearch(data *dto.WSInteractionData) error {
 					groupMsg.Sender.Role = "member"
 				}
 
-				// 映射消息类型
-				echo.AddMsgType(AppIDString, s, "group")
-
-				//储存当前群或频道号的类型
-				//idmap.WriteConfigv2(fmt.Sprint(GroupID64), "type", "group")
-
-				//映射类型
-				echo.AddMsgType(AppIDString, GroupID64, "group")
-
 				// 调试
 				PrintStructWithFieldNames(groupMsg)
 
 				// Convert OnebotGroupMessage to map and send
 				groupMsgMap := structToMap(groupMsg)
-				//上报信息到onebotv11应用端(正反ws)
-				go p.BroadcastMessageToAll(groupMsgMap, p.Apiv2, data)
-
-				// 转换appid
-				AppIDString := strconv.FormatUint(p.Settings.AppID, 10)
-
-				// 储存和群号相关的eventid
-				fmt.Printf("测试:储存eventid:[%v]LongGroupID64[%v]\n", data.EventID, LongGroupID64)
-				echo.AddEvnetIDv2(AppIDString, data.GroupOpenID, data.EventID)
-
-				// 上报事件
-				notice := &OnebotInteractionNotice{
-					GroupID:    GroupID64,
-					NoticeType: "interaction",
-					PostType:   "notice",
-					SelfID:     selfid64,
-					SubType:    "create",
-					Time:       time.Now().Unix(),
-					UserID:     userid64,
-					Data:       data,
+				// 如果不是性能模式
+				if !config.GetDisableErrorChan() {
+					//上报信息到onebotv11应用端(正反ws) 并等待返回
+					go p.BroadcastMessageToAll(groupMsgMap, p.Apiv2, data)
+				} else {
+					// FAF式
+					go p.BroadcastMessageToAllFAF(groupMsgMap, p.Apiv2, data)
 				}
-				//增强配置
-				if !config.GetNativeOb11() {
-					notice.RealUserID = fromuid
-					notice.RealGroupID = fromgid
-				}
-				//调试
-				PrintStructWithFieldNames(notice)
-
-				// Convert OnebotGroupMessage to map and send
-				noticeMap := structToMap(notice)
-
-				//上报信息到onebotv11应用端(正反ws)
-				go p.BroadcastMessageToAll(noticeMap, p.Apiv2, data)
 			}
 		} else if data.UserOpenID != "" {
 
@@ -559,26 +483,41 @@ func (p *Processors) ProcessInlineSearch(data *dto.WSInteractionData) error {
 				} else {
 					selfid64 = int64(p.Settings.AppID)
 				}
-				privateMsg := OnebotGroupMessageS{
-					RawMessage:  data.Data.Resolved.ButtonData,
-					Message:     segmentedMessages,
-					MessageID:   data.EventID,
-					MessageType: "group",
-					PostType:    "message",
-					SelfID:      selfid64,
-					GroupID:     data.UserOpenID,
-					UserID:      data.UserOpenID,
+				messageTime, err := time.Parse(time.RFC3339, data.Timestamp)
+				if err != nil {
+					log.Fatalf("Error original timestamp: %v", err)
+					messageTime = time.Now()
+				}
+				privateMsg := OnebotGroupMessage{
+					RawMessage:    data.Data.Resolved.ButtonData,
+					Message:       segmentedMessages,
+					MessageID:     0, // 这个事件没有真正的messageID,可以考虑用eventID或者不填
+					RealMessageID: data.ID,
+					GroupID:       GroupID64,
+					MessageType:   "group",
+					PostType:      "message",
+					SelfID:        selfid64,
+					UserID:        userid64,
 					Sender: Sender{
 						UserID: userid64,
+						Sex:    "0",
+						Age:    0,
+						Area:   "0",
+						Level:  "0",
 					},
-					SubType:  "normal",
-					Time:     time.Now().Unix(),
-					Platform: platform,
+					SubType: "button",
+					Time:    messageTime.Unix(),
 				}
 				//增强配置
 				if !config.GetNativeOb11() {
 					privateMsg.RealMessageType = "group_private"
-					privateMsg.RealUserID = data.UserOpenID
+					privateMsg.RealUserID = data.GroupMemberOpenID
+				}
+				//根据条件判断是否增加nick和card
+				var CaN = config.GetCardAndNick()
+				if CaN != "" {
+					privateMsg.Sender.Nickname = CaN
+					privateMsg.Sender.Card = CaN
 				}
 				// 根据条件判断是否添加Echo字段
 				if config.GetTwoWayEcho() {
@@ -586,57 +525,34 @@ func (p *Processors) ProcessInlineSearch(data *dto.WSInteractionData) error {
 					//用向应用端(如果支持)发送echo,来确定客户端的send_msg对应的触发词原文
 					echo.AddMsgIDv3(AppIDString, echostr, data.Data.Resolved.ButtonData)
 				}
-				// 映射类型 对S映射
-				echo.AddMsgType(AppIDString, s, "group_private")
+				// 获取MasterID数组
+				masterIDs := config.GetMasterID()
 
-				// 映射类型 对userid64映射
-				echo.AddMsgType(AppIDString, userid64, "group_private")
+				// 判断userid64是否在masterIDs数组里
+				isMaster := slices.Contains(masterIDs, strconv.FormatInt(userid64, 10))
 
-				// 持久化储存当前用户的类型
-				//idmap.WriteConfigv2(fmt.Sprint(userid64), "type", "group_private")
+				// 根据isMaster的值为groupMsg的Sender赋值role字段
+				if isMaster {
+					privateMsg.Sender.Role = "owner"
+				} else {
+					privateMsg.Sender.Role = "member"
+				}
 
 				// 调试
 				PrintStructWithFieldNames(privateMsg)
 
 				// Convert OnebotGroupMessage to map and send
 				privateMsgMap := structToMap(privateMsg)
-
-				if privateMsg.RawMessage != "" {
-					//上报信息到onebotv11应用端(正反ws)
+				// 如果不是性能模式
+				if !config.GetDisableErrorChan() {
+					//上报信息到onebotv11应用端(正反ws) 并等待返回
 					go p.BroadcastMessageToAll(privateMsgMap, p.Apiv2, data)
+				} else {
+					// FAF式
+					go p.BroadcastMessageToAllFAF(privateMsgMap, p.Apiv2, data)
 				}
-
-				// 转换appid
-				AppIDString := strconv.FormatUint(p.Settings.AppID, 10)
-
-				// 储存和用户ID相关的eventid
-				echo.AddEvnetIDv2(AppIDString, data.UserOpenID, data.EventID)
-
-				// 上报事件
-				notice := &OnebotInteractionNotice{
-					GroupID:    GroupID64,
-					NoticeType: "interaction",
-					PostType:   "notice",
-					SelfID:     selfid64,
-					SubType:    "create",
-					Time:       time.Now().Unix(),
-					UserID:     userid64,
-					Data:       data,
-				}
-				//增强配置
-				if !config.GetNativeOb11() {
-					notice.RealUserID = fromuid
-					notice.RealGroupID = fromgid
-				}
-				//调试
-				PrintStructWithFieldNames(notice)
-
-				// Convert OnebotGroupMessage to map and send
-				noticeMap := structToMap(notice)
-
-				//上报信息到onebotv11应用端(正反ws)
-				go p.BroadcastMessageToAll(noticeMap, p.Apiv2, data)
 			}
+
 		} else {
 			// TODO: 区分频道和频道私信 如果有人提需求
 			// 频道回调
