@@ -133,10 +133,10 @@ func HandleSendPrivateMsg(client callapi.Client, api openapi.OpenAPI, apiv2 open
 			// action里直接传了openid message_id 就用它
 			messageID = message.Params.MessageID.(string)
 			mylog.Println("从action中取私聊发信息对应的message_id:", messageID)
-			if messageID == "" {
-				eventID = message.Params.EventID
-				mylog.Println("从action中无message_id使用event_id:", eventID)
-			}
+		}
+		if messageID == "" {
+			eventID = message.Params.EventID
+			mylog.Println("从action中无message_id使用event_id:", eventID)
 		}
 		mylog.Println("私聊发信息messageText:", messageText)
 		var singleItem = make(map[string][]string)

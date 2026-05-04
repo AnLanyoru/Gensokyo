@@ -35,10 +35,14 @@ func (p *Processors) ProcessInlineSearch(data *dto.WSInteractionData) error {
 	var LongUserID64 int64
 	var err error
 	var fromgid, fromuid string
-	if data.GroupOpenID != "" {
+	switch data.Scene {
+	case "group":
 		fromgid = data.GroupOpenID
 		fromuid = data.GroupMemberOpenID
-	} else {
+	case "c2c":
+		fromgid = data.UserOpenID
+		fromuid = data.UserOpenID
+	default:
 		fromgid = data.ChannelID
 		fromuid = data.GuildID
 	}
@@ -511,7 +515,7 @@ func (p *Processors) ProcessInlineSearch(data *dto.WSInteractionData) error {
 				//增强配置
 				if !config.GetNativeOb11() {
 					privateMsg.RealMessageType = "group_private"
-					privateMsg.RealUserID = data.GroupMemberOpenID
+					privateMsg.RealUserID = data.UserOpenID
 				}
 				//根据条件判断是否增加nick和card
 				var CaN = config.GetCardAndNick()
