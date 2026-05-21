@@ -47,7 +47,7 @@ func HandleSendPrivateMsgWakeup(client callapi.Client, api openapi.OpenAPI, apiv
 	var selfID int64 = int64(config.GetAppID())
 
 	// 2. 解析消息内容
-	messageText, foundItems := parseMessageContent(message.Params, message, client, api, apiv2)
+	messageText, foundItems := parseMessageContent(message.Params)
 
 	mylog.Printf("发送互动召回消息 UserID:[%s]", userID)
 

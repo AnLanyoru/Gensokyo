@@ -28,7 +28,7 @@ type Message struct {
 	// 结构化消息-embeds
 	Embeds []*Embed `json:"embeds"`
 	// 消息中的提醒信息(@)列表
-	Mentions []*User `json:"mentions"`
+	Mentions []*Mention `json:"mentions"`
 	// ark 消息
 	Ark *Ark `json:"ark"`
 	// 私信消息
@@ -41,6 +41,16 @@ type Message struct {
 	SrcGuildID string `json:"src_guild_id"`
 	//返回的ret 超过主动限制会返回22009
 	Ret int `json:"ret,omitempty"`
+}
+
+// Mention 消息中提到的用户(@)结构体定义
+type Mention struct {
+	Id           string `json:"id,omitempty"`
+	Username     string `json:"username,omitempty"`
+	Bot          bool   `json:"bot,omitempty"`
+	MemberOpenid string `json:"member_openid,omitempty"`
+	Scope        string `json:"scope,omitempty"`
+	IsYou        bool   `json:"is_you,omitempty"`
 }
 
 // Forum 消息结构体定义

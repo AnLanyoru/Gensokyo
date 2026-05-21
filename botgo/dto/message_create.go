@@ -41,6 +41,35 @@ func (msg RichMediaMessage) GetSendType() SendType {
 	return RichMedia
 }
 
+// InputNotify 输入状态结构
+type InputNotify struct {
+	InputType   int   `json:"input_type,omitempty"`   // 类型 1: "对方正在输入...", 2: 取消展示"]
+	InputSecond int32 `json:"input_second,omitempty"` // 当input_type大于0时有效, 代码状态持续多长时间.
+}
+
+// Stream 流式消息信息
+type Stream struct {
+	State int32  `json:"state,omitempty"` // 流式消息状态 1正文生成中，10：正文生成结束， 11：引志消息生成中， 20：引导消息生成结束。
+	ID    string `json:"id,omitempty"`    // 流式消息ID，流式消息第一条不用填写，第二条需要填写第一个分片返回的msgID.
+	Index int32  `json:"index,omitempty"` // 流式消息的序号， 从1开始
+	Reset bool   `json:"reset,omitempty"` // 重新生成流式消息标记，此参数只能使用于流式消息分片还没有发送完成时，reset时Index需要从0开始，需要填写流式ID。
+}
+
+// PromptKeyboard 交互区操作
+type PromptKeyboard struct {
+	Keyboard *keyboard.MessageKeyboard `json:"keyboard,omitempty"` // 消息按钮组件
+}
+
+// ActionButton 消息操作按钮
+type ActionButton struct {
+	TemplateID   int32  `json:"template_id,omitempty"`   // 消息操作栏模块ID，与下面具体具体按钮二选一填写。待废弃字段！！！
+	CallbackData string `json:"callback_data,omitempty"` // 用户操作时会回调通过回调事件给到button_data中， 最长不超过128个字符。
+	Feedback     bool   `json:"feedback,omitempty"`      // 反馈按钮（赞踩按钮）
+	TTS          bool   `json:"tts,omitempty"`           // TTS语音播放按钮
+	ReGenerate   bool   `json:"re_generate,omitempty"`   // 重新生成按钮
+	StopGenerate bool   `json:"stop_generate,omitempty"` // 停止生成按钮
+}
+
 // MessageToCreate 发送消息结构体定义
 type MessageToCreate struct {
 	Content string `json:"content,omitempty"`
@@ -53,10 +82,13 @@ type MessageToCreate struct {
 	MsgID            string                    `json:"msg_id,omitempty"`
 	MessageReference *MessageReference         `json:"message_reference,omitempty"`
 	Markdown         *Markdown                 `json:"markdown,omitempty"`
-	Keyboard         *keyboard.MessageKeyboard `json:"keyboard,omitempty"`  // 消息按钮组件
-	EventID          string                    `json:"event_id,omitempty"`  // 要回复的事件id, 逻辑同MsgID
-	Timestamp        int64                     `json:"timestamp,omitempty"` //TODO delete this
-	MsgSeq           int                       `json:"msg_seq,omitempty"`   //回复消息的序号，与 msg_id 联合使用，避免相同消息id回复重复发送，不填默认是1。相同的 msg_id + msg_seq 重复发送会失败。
+	Keyboard         *keyboard.MessageKeyboard `json:"keyboard,omitempty"`        // 消息按钮组件
+	InputNotify      *InputNotify              `json:"input_notify,omitempty"`    // 输入状态状态信息
+	PromptKeyboard   *PromptKeyboard           `json:"prompt_keyboard,omitempty"` // 消息扩展信息
+	ActionButton     *ActionButton             `json:"action_button,omitempty"`   // 消息操作结构
+	EventID          string                    `json:"event_id,omitempty"`        // 要回复的事件id, 逻辑同MsgID
+	Timestamp        int64                     `json:"timestamp,omitempty"`       //TODO delete this
+	MsgSeq           int                       `json:"msg_seq,omitempty"`         //回复消息的序号，与 msg_id 联合使用，避免相同消息id回复重复发送，不填默认是1。相同的 msg_id + msg_seq 重复发送会失败。
 
 	// [新增] 互动召回消息标记
 	// 指明发送消息为互动召回消息，与 msg_id，event_id 互斥使用
@@ -102,6 +134,14 @@ type Markdown struct {
 	CustomTemplateID string            `json:"custom_template_id,omitempty"` // 模版 id 群
 	Params           []*MarkdownParams `json:"params,omitempty"`             // 模版参数
 	Content          string            `json:"content,omitempty"`            // 原生 markdown
+	Style            *MarkdownStyle    `json:"style"`                        // markdown样式
+	ProcessMsg       string            `json:"process_msg"`                  // markdown引导消息
+}
+
+// MarkdownStyle markdown 样式
+type MarkdownStyle struct {
+	MainFontSize string `json:"main_font_size"` // 正文字体大小 small middle large
+	Layout       string `json:"layout"`         // hide_avatar_and_center 隐藏头像并居中
 }
 
 // MarkdownParams markdown 模版参数 键值对

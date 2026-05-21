@@ -36,7 +36,6 @@ import (
 	"github.com/hoshinonyaruko/gensokyo/sys"
 	"github.com/hoshinonyaruko/gensokyo/template"
 	"github.com/hoshinonyaruko/gensokyo/url"
-	"github.com/hoshinonyaruko/gensokyo/webui"
 	"github.com/hoshinonyaruko/gensokyo/wsclient"
 	"github.com/tencent-connect/botgo/sessions/multi"
 	"google.golang.org/grpc"
@@ -91,7 +90,7 @@ func main() {
 				ip = "127.0.0.1"
 			}
 		}
-		// 将 <YOUR_SERVER_DIR> 替换成实际的内网IP地址 确保初始状态webui能够被访问
+		// 将 <YOUR_SERVER_DIR> 替换成实际的内网IP地址
 		configData := strings.Replace(template.ConfigTemplate, "<YOUR_SERVER_DIR>", ip, -1)
 
 		// 将修改后的配置写入 config.yml
@@ -118,9 +117,6 @@ func main() {
 	go setupConfigWatcher("config.yml")
 
 	sys.SetTitle(conf.Settings.Title)
-	webuiURL := config.ComposeWebUIURL(conf.Settings.Lotus)     // 调用函数获取URL
-	webuiURLv2 := config.ComposeWebUIURLv2(conf.Settings.Lotus) // 调用函数获取URL
-
 	var api openapi.OpenAPI
 	var apiV2 openapi.OpenAPI
 	var wsClients []*wsclient.WebSocketClient
@@ -138,14 +134,10 @@ func main() {
 		conf.Settings.EnableWsServer = false
 	}
 
-	// 创建webui数据库
-	webui.InitializeDB()
-	defer webui.CloseDB()
-
 	if conf.Settings.AppID == 12345 {
 		// 输出天蓝色文本
 		cyan := color.New(color.FgCyan)
-		cyan.Printf("欢迎来到Gensokyo, 控制台地址: %s\n", webuiURL)
+		cyan.Printf("欢迎来到Gensokyo_lunar\r")
 		log.Println("请完成机器人配置后重启框架。")
 
 	} else {
@@ -466,19 +458,6 @@ func main() {
 	r.POST("/"+conf.Settings.WebhookPath, UnionFanout(server.CreateHandleValidationSafe(webhookHandler)))
 
 	r.Static("/channel_temp", "./channel_temp")
-	if config.GetFrpPort() == "0" && !config.GetDisableWebui() {
-		//webui和它的api
-		webuiGroup := r.Group("/webui")
-		{
-			webuiGroup.GET("/*filepath", webui.CombinedMiddleware(api, apiV2))
-			webuiGroup.POST("/*filepath", webui.CombinedMiddleware(api, apiV2))
-			webuiGroup.PUT("/*filepath", webui.CombinedMiddleware(api, apiV2))
-			webuiGroup.DELETE("/*filepath", webui.CombinedMiddleware(api, apiV2))
-			webuiGroup.PATCH("/*filepath", webui.CombinedMiddleware(api, apiV2))
-		}
-	} else {
-		mylog.Println("Either FRP port is set to '0' or WebUI is disabled.")
-	}
 	//正向http api
 	http_api_address := config.GetHttpAddress()
 	if http_api_address != "" {
@@ -612,9 +591,8 @@ func main() {
 
 	// 使用color库输出天蓝色的文本
 	cyan := color.New(color.FgCyan)
-	cyan.Printf("欢迎来到Gensokyo, 控制台地址: %s\n", webuiURL)
 	cyan.Printf("%s\n", template.Logo)
-	cyan.Printf("欢迎来到Gensokyo, 公网控制台地址(需开放端口): %s\n", webuiURLv2)
+	cyan.Printf("欢迎来到Gensokyo_lunar\n")
 
 	// 使用通道来等待信号
 	sigCh := make(chan os.Signal, 1)
@@ -761,7 +739,27 @@ func ThreadEventHandler() event.ThreadEventHandler {
 // GroupATMessageEventHandler 实现处理 群at 消息的回调
 func GroupATMessageEventHandler() event.GroupATMessageEventHandler {
 	return func(event *dto.WSPayload, data *dto.WSGroupATMessageData) error {
-		go p.ProcessGroupMessage(data)
+		go p.ProcessGroupMessage(data, true)
+
+		if !config.GetDisableErrorChan() {
+			botstats.RecordMessageReceived()
+		}
+
+		if config.GetEnableChangeWord() {
+			data.Content = acnode.CheckWordIN(data.Content)
+			if data.Author.Username != "" {
+				data.Author.Username = acnode.CheckWordIN(data.Author.Username)
+			}
+		}
+
+		return nil
+	}
+}
+
+// GroupMessageEventHandler 实现处理 群消息的回调
+func GroupMessageEventHandler() event.GroupMessageEventHandler {
+	return func(event *dto.WSPayload, data *dto.WSGroupATMessageData) error {
+		go p.ProcessGroupMessage(data, false)
 
 		if !config.GetDisableErrorChan() {
 			botstats.RecordMessageReceived()
@@ -887,6 +885,8 @@ func getHandlerByName(handlerName string) (interface{}, bool) {
 		return ThreadEventHandler(), true
 	case "GroupATMessageEventHandler": //群at信息
 		return GroupATMessageEventHandler(), true
+	case "GroupMessageEventHandler": //群全量消息
+		return GroupMessageEventHandler(), true
 	case "C2CMessageEventHandler": //群私聊
 		return C2CMessageEventHandler(), true
 	case "GroupAddRobotEventHandler": //群添加机器人

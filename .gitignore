@@ -15,8 +15,5 @@ channel_temp/
 # Ignore log
 log/
 
-# ignore dist
-webui/dist/
-
 #ignore data
 data/
