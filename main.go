@@ -757,7 +757,7 @@ func GroupATMessageEventHandler() event.GroupATMessageEventHandler {
 }
 
 // GroupMessageEventHandler 实现处理 群消息的回调
-func GroupMessageEventHandler() event.GroupATMessageEventHandler {
+func GroupMessageEventHandler() event.GroupMessageEventHandler {
 	return func(event *dto.WSPayload, data *dto.WSGroupATMessageData) error {
 		go p.ProcessGroupMessage(data, false)
 

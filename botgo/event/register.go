@@ -114,7 +114,7 @@ type InteractionEventHandler func(event *dto.WSPayload, data *dto.WSInteractionD
 type GroupATMessageEventHandler func(event *dto.WSPayload, data *dto.WSGroupATMessageData) error
 
 // GroupMessageEventHandler 群全量消息事件 handler
-type GroupMessageEventHandler func(event *dto.WSPayload, data *dto.WSGroupMessageData) error
+type GroupMessageEventHandler func(event *dto.WSPayload, data *dto.WSGroupATMessageData) error
 
 // C2CMessageEventHandler 机器人消息事件 handler
 type C2CMessageEventHandler func(event *dto.WSPayload, data *dto.WSC2CMessageData) error

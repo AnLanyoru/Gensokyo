@@ -185,6 +185,7 @@ func (p *Processors) ProcessInlineSearch(data *dto.WSInteractionData) error {
 					},
 					SubType: "normal",
 					Time:    time.Now().Unix(),
+					ToMe:    true,
 				}
 				//增强配置
 				if !config.GetNativeOb11() {
@@ -315,6 +316,7 @@ func (p *Processors) ProcessInlineSearch(data *dto.WSInteractionData) error {
 					},
 					SubType: "button",
 					Time:    messageTime.Unix(),
+					ToMe:    true,
 				}
 				//增强配置
 				if !config.GetNativeOb11() {

@@ -265,6 +265,7 @@ func (p *Processors) ProcessC2CMessage(data *dto.WSC2CMessageData) error {
 				},
 				SubType: "normal",
 				Time:    time.Now().Unix(),
+				ToMe:    true,
 			}
 			//增强配置
 			if !config.GetNativeOb11() {
@@ -417,6 +418,7 @@ func (p *Processors) ProcessC2CMessage(data *dto.WSC2CMessageData) error {
 				},
 				SubType: "normal",
 				Time:    messageTime.Unix(),
+				ToMe:    true,
 			}
 
 			//增强配置

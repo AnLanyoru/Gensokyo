@@ -98,7 +98,7 @@ type OnebotGroupMessage struct {
 	RealGroupID     string      `json:"real_group_id,omitempty"`      //当前真实gid
 	IsBindedGroupId bool        `json:"is_binded_group_id,omitempty"` //当前群号是否是binded后的
 	IsBindedUserId  bool        `json:"is_binded_user_id,omitempty"`  //当前用户号号是否是binded后的
-	ToMe            bool        `json:"to_me,omitempty"`              //是否at机器人
+	ToMe            bool        `json:"to_me"`                        //是否at机器人
 }
 
 type OnebotGroupMessageS struct {

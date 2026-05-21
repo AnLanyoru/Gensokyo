@@ -4,6 +4,7 @@ package Processor
 import (
 	"fmt"
 	"log"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -37,6 +38,7 @@ func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData, at_me b
 
 	// 全量群消息再mention中确定是否at me
 	if !at_me {
+		mylog.Printf("非at消息")
 		at_me = checkMe(data)
 	}
 	if !config.GetStringOb11() {
@@ -131,12 +133,6 @@ func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData, at_me b
 			log.Fatalf("Error storing ID: %v", err)
 		}
 		messageID = int(messageID64)
-	}
-
-	if config.GetAutoBind() {
-		if len(data.Attachments) > 0 && data.Attachments[0].URL != "" {
-			p.Autobind(data)
-		}
 	}
 
 	// 如果在Array模式下, 则处理Message为Segment格式
@@ -296,13 +292,7 @@ func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData, at_me b
 		masterIDs := config.GetMasterID()
 
 		// 判断userid64是否在masterIDs数组里
-		isMaster := false
-		for _, id := range masterIDs {
-			if strconv.FormatInt(userid64, 10) == id {
-				isMaster = true
-				break
-			}
-		}
+		isMaster := slices.Contains(masterIDs, strconv.FormatInt(userid64, 10))
 		// 根据isMaster的值为groupMsg的Sender赋值role字段
 		if isMaster {
 			groupMsgS.Sender.Role = "owner"
