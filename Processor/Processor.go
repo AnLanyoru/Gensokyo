@@ -99,6 +99,7 @@ type OnebotGroupMessage struct {
 	IsBindedGroupId bool        `json:"is_binded_group_id,omitempty"` //当前群号是否是binded后的
 	IsBindedUserId  bool        `json:"is_binded_user_id,omitempty"`  //当前用户号号是否是binded后的
 	ToMe            bool        `json:"to_me"`                        //是否at机器人
+	AtList          []string    `json:"at_list,omitempty"`            //at的列表
 }
 
 type OnebotGroupMessageS struct {

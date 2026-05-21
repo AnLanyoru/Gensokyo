@@ -4,6 +4,7 @@ package Processor
 import (
 	"fmt"
 	"log"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -25,6 +26,7 @@ func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData, at_me b
 	var userid64 int64
 	var GroupID64 int64
 	var err error
+	var at_list []string
 
 	if data.Author.ID == "" {
 		mylog.Printf("出现ID为空未知错误.%v\n", data)
@@ -38,8 +40,9 @@ func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData, at_me b
 
 	// 全量群消息再mention中确定是否at me
 	if !at_me {
-		mylog.Printf("非at消息")
-		at_me = checkMe(data)
+		at_me = CheckMe(data)
+		//只有全量消息才会有<@open_id>标签
+		at_list, data.Content = CheckAt(data.Content)
 	}
 	if !config.GetStringOb11() {
 		if config.GetIdmapPro() {
@@ -185,6 +188,7 @@ func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData, at_me b
 			SubType: "normal",
 			Time:    time.Now().Unix(),
 			ToMe:    at_me,
+			AtList:  at_list,
 		}
 		//增强配置
 		if !config.GetNativeOb11() {
@@ -274,6 +278,7 @@ func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData, at_me b
 			SubType: "normal",
 			Time:    messageTime.UnixMilli(),
 			ToMe:    at_me,
+			AtList:  at_list,
 		}
 		// 增强配置
 		if !config.GetNativeOb11() {
@@ -317,7 +322,7 @@ func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData, at_me b
 	return nil
 }
 
-func checkMe(data *dto.WSGroupATMessageData) bool {
+func CheckMe(data *dto.WSGroupATMessageData) bool {
 	mentions := data.Mentions
 	if mentions == nil {
 		return false
@@ -328,4 +333,28 @@ func checkMe(data *dto.WSGroupATMessageData) bool {
 		}
 	}
 	return false
+}
+
+// 预编译正则表达式（全局只编译一次，性能最优）
+// 匹配 <@任意字符>，非贪婪匹配，避免跨标签错误
+var atTagRegex = regexp.MustCompile(`<@([^>]+)>`)
+
+// 提取字符串中所有 <@xxx> 格式的标签内容
+// 参数：input 输入字符串
+// 返回值：所有标签内的内容列表，无匹配则返回空切片
+func CheckAt(content string) ([]string, string) {
+	// 查找所有子匹配
+	matches := atTagRegex.FindAllStringSubmatch(content, -1)
+
+	// 初始化结果切片
+	result := make([]string, 0, len(matches))
+
+	// 遍历匹配结果，提取分组内容
+	for _, match := range matches {
+		if len(match) >= 2 {
+			result = append(result, match[1])
+		}
+	}
+	cleanStr := atTagRegex.ReplaceAllString(content, "")
+	return result, cleanStr
 }
