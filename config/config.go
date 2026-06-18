@@ -910,50 +910,6 @@ func GetDeveloperLog() bool {
 	return instance.Settings.DeveloperLog
 }
 
-// ComposeWebUIURL 组合webui的完整访问地址
-// 参数 useBackupPort 控制是否使用备用端口
-func ComposeWebUIURL(useBackupPort bool) string {
-	serverDir := GetServer_dir()
-
-	var port string
-	if useBackupPort {
-		port = GetBackupPort()
-	} else {
-		port = GetPortValue()
-	}
-
-	// 判断端口是不是443，如果是，则使用https协议
-	protocol := "http"
-	if port == "443" {
-		protocol = "https"
-	}
-
-	// 组合出完整的URL
-	return fmt.Sprintf("%s://%s:%s/webui", protocol, serverDir, port)
-}
-
-// ComposeWebUIURLv2 组合webui的完整访问地址
-// 参数 useBackupPort 控制是否使用备用端口
-func ComposeWebUIURLv2(useBackupPort bool) string {
-	ip, _ := sys.GetPublicIP()
-
-	var port string
-	if useBackupPort {
-		port = GetBackupPort()
-	} else {
-		port = GetPortValue()
-	}
-
-	// 判断端口是不是443，如果是，则使用https协议
-	protocol := "http"
-	if port == "443" {
-		protocol = "https"
-	}
-
-	// 组合出完整的URL
-	return fmt.Sprintf("%s://%s:%s/webui", protocol, ip, port)
-}
-
 // GetServerUserName 获取服务器用户名
 func GetServerUserName() string {
 	mu.RLock()
@@ -1998,18 +1954,6 @@ func GetMusicPrefix() string {
 		return ""
 	}
 	return instance.Settings.MusicPrefix
-}
-
-// 获取 GetDisableWebui 的值
-func GetDisableWebui() bool {
-	mu.RLock()
-	defer mu.RUnlock()
-
-	if instance == nil {
-		fmt.Println("Warning: instance is nil when trying to GetDisableWebui value.")
-		return false
-	}
-	return instance.Settings.DisableWebui
 }
 
 // 获取 GetBotForumTitle

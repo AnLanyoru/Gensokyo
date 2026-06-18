@@ -119,7 +119,7 @@ func HandleSendGroupMsgRaw(client callapi.Client, api openapi.OpenAPI, apiv2 ope
 	switch msgType {
 	case "group":
 		// 解析消息内容
-		messageText, foundItems := parseMessageContent(message.Params, message, client, api, apiv2)
+		messageText, foundItems := parseMessageContent(message.Params)
 		var SSM bool
 
 		var originalGroupID, originalUserID string

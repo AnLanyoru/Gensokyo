@@ -4,6 +4,8 @@ package Processor
 import (
 	"fmt"
 	"log"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -16,26 +18,15 @@ import (
 	"github.com/hoshinonyaruko/gensokyo/unioncache"
 
 	"github.com/tencent-connect/botgo/dto"
-	"github.com/tencent-connect/botgo/websocket/client"
 )
 
 // ProcessGroupMessage 处理群组消息
-func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData) error {
-	// 获取s
-	s := client.GetGlobalS()
-
-	// 转换appid
-	AppIDString := strconv.FormatUint(p.Settings.AppID, 10)
-
-	// 获取当前时间的13位毫秒级时间戳
-	currentTimeMillis := time.Now().UnixNano() / 1e6
-
-	// 构造echostr，包括AppID，原始的s变量和当前时间戳
-	echostr := fmt.Sprintf("%s_%d_%d", AppIDString, s, currentTimeMillis)
+func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData, at_me bool) error {
 
 	var userid64 int64
 	var GroupID64 int64
 	var err error
+	var at_list []string
 
 	if data.Author.ID == "" {
 		mylog.Printf("出现ID为空未知错误.%v\n", data)
@@ -47,6 +38,12 @@ func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData) error {
 		unioncache.Store(data.Author.ID, data.Author.UnionOpenID)
 	}
 
+	// 全量群消息再mention中确定是否at me
+	if !at_me {
+		at_me = CheckMe(data)
+		//只有全量消息才会有<@open_id>标签
+		at_list, data.Content = CheckAt(data.Content)
+	}
 	if !config.GetStringOb11() {
 		if config.GetIdmapPro() {
 			//将真实id转为int userid64
@@ -64,8 +61,6 @@ func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData) error {
 			idmap.SimplifiedStoreID(data.Author.ID)
 			//补救措施
 			idmap.SimplifiedStoreID(data.GroupID)
-			//补救措施
-			echo.AddMsgIDv3(AppIDString, data.GroupID, data.ID)
 		} else {
 			// 映射str的GroupID到int
 			GroupID64, err = idmap.StoreIDv2(data.GroupID)
@@ -119,11 +114,6 @@ func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData) error {
 
 	}
 
-	//群没有at,但用户可以选择加一个
-	if config.GetAddAtGroup() {
-		messageText = "[CQ:at,qq=" + config.GetAppIDStr() + "] " + messageText
-	}
-
 	var messageID int
 	//映射str的messageID到int
 	if !config.GetStringOb11() {
@@ -146,12 +136,6 @@ func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData) error {
 			log.Fatalf("Error storing ID: %v", err)
 		}
 		messageID = int(messageID64)
-	}
-
-	if config.GetAutoBind() {
-		if len(data.Attachments) > 0 && data.Attachments[0].URL != "" {
-			p.Autobind(data)
-		}
 	}
 
 	// 如果在Array模式下, 则处理Message为Segment格式
@@ -203,6 +187,8 @@ func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData) error {
 			},
 			SubType: "normal",
 			Time:    time.Now().Unix(),
+			ToMe:    at_me,
+			AtList:  at_list,
 		}
 		//增强配置
 		if !config.GetNativeOb11() {
@@ -218,12 +204,6 @@ func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData) error {
 		if CaN != "" {
 			groupMsg.Sender.Nickname = CaN
 			groupMsg.Sender.Card = CaN
-		}
-		// 根据条件判断是否添加Echo字段
-		if config.GetTwoWayEcho() {
-			groupMsg.Echo = echostr
-			//用向应用端(如果支持)发送echo,来确定客户端的send_msg对应的触发词原文
-			echo.AddMsgIDv3(AppIDString, echostr, messageText)
 		}
 		// 获取MasterID数组
 		masterIDs := config.GetMasterID()
@@ -243,17 +223,8 @@ func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData) error {
 		} else {
 			groupMsg.Sender.Role = "member"
 		}
-		// 将当前s和appid和message进行映射
-		echo.AddMsgID(AppIDString, s, data.ID)
-		echo.AddMsgType(AppIDString, s, "group")
-		//为不支持双向echo的ob服务端映射
-		echo.AddMsgID(AppIDString, GroupID64, data.ID)
-		//将当前的userid和groupid和msgid进行一个更稳妥的映射
-		echo.AddMsgIDv2(AppIDString, GroupID64, userid64, data.ID)
 		//储存当前群或频道号的类型
 		idmap.WriteConfigv2(fmt.Sprint(GroupID64), "type", "group")
-		//映射类型
-		echo.AddMsgType(AppIDString, GroupID64, "group")
 		//懒message_id池
 		echo.AddLazyMessageId(strconv.FormatInt(GroupID64, 10), data.ID, time.Now())
 		//懒message_id池
@@ -282,6 +253,11 @@ func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData) error {
 		if err != nil {
 			mylog.Errorf("Error storing ID: %v", err)
 		}
+		messageTime, err := data.Timestamp.Time()
+		if err != nil {
+			log.Fatalf("Error original timestamp: %v", err)
+			messageTime = time.Now()
+		}
 		groupMsgS := OnebotGroupMessage{
 			RawMessage:    messageText,
 			Message:       segmentedMessages,
@@ -300,7 +276,9 @@ func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData) error {
 				Level:  "0",
 			},
 			SubType: "normal",
-			Time:    time.Now().Unix(),
+			Time:    messageTime.UnixMilli(),
+			ToMe:    at_me,
+			AtList:  at_list,
 		}
 		// 增强配置
 		if !config.GetNativeOb11() {
@@ -315,23 +293,11 @@ func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData) error {
 			groupMsgS.Sender.Nickname = CaN
 			groupMsgS.Sender.Card = CaN
 		}
-		// 根据条件判断是否添加Echo字段
-		if config.GetTwoWayEcho() {
-			groupMsgS.Echo = echostr
-			//用向应用端(如果支持)发送echo,来确定客户端的send_msg对应的触发词原文
-			echo.AddMsgIDv3(AppIDString, echostr, messageText)
-		}
 		// 获取MasterID数组
 		masterIDs := config.GetMasterID()
 
 		// 判断userid64是否在masterIDs数组里
-		isMaster := false
-		for _, id := range masterIDs {
-			if strconv.FormatInt(userid64, 10) == id {
-				isMaster = true
-				break
-			}
-		}
+		isMaster := slices.Contains(masterIDs, strconv.FormatInt(userid64, 10))
 		// 根据isMaster的值为groupMsg的Sender赋值role字段
 		if isMaster {
 			groupMsgS.Sender.Role = "owner"
@@ -354,4 +320,41 @@ func (p *Processors) ProcessGroupMessage(data *dto.WSGroupATMessageData) error {
 	}
 
 	return nil
+}
+
+func CheckMe(data *dto.WSGroupATMessageData) bool {
+	mentions := data.Mentions
+	if mentions == nil {
+		return false
+	}
+	for _, mention := range mentions {
+		if mention.IsYou == true {
+			return true
+		}
+	}
+	return false
+}
+
+// 预编译正则表达式（全局只编译一次，性能最优）
+// 匹配 <@任意字符>，非贪婪匹配，避免跨标签错误
+var atTagRegex = regexp.MustCompile(`<@([^>]+)>`)
+
+// 提取字符串中所有 <@xxx> 格式的标签内容
+// 参数：input 输入字符串
+// 返回值：所有标签内的内容列表，无匹配则返回空切片
+func CheckAt(content string) ([]string, string) {
+	// 查找所有子匹配
+	matches := atTagRegex.FindAllStringSubmatch(content, -1)
+
+	// 初始化结果切片
+	result := make([]string, 0, len(matches))
+
+	// 遍历匹配结果，提取分组内容
+	for _, match := range matches {
+		if len(match) >= 2 {
+			result = append(result, match[1])
+		}
+	}
+	cleanStr := atTagRegex.ReplaceAllString(content, "")
+	return result, cleanStr
 }

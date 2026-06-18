@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"path/filepath"
 	"regexp"
@@ -26,13 +25,10 @@ import (
 	"github.com/hoshinonyaruko/gensokyo/images"
 	"github.com/hoshinonyaruko/gensokyo/mylog"
 	"github.com/hoshinonyaruko/gensokyo/structs"
-	"github.com/hoshinonyaruko/gensokyo/url"
-	"github.com/skip2/go-qrcode"
 	"github.com/tencent-connect/botgo/dto"
 	"github.com/tencent-connect/botgo/dto/keyboard"
 	"github.com/tencent-connect/botgo/openapi"
 	"github.com/tidwall/gjson"
-	"mvdan.cc/xurls" //xurls是一个从文本提取url的库 适用于多种场景
 )
 
 var BotID string
@@ -545,29 +541,70 @@ func SendGuildPrivateResponse(client callapi.Client, err error, message *callapi
 	return string(jsonResponse), nil
 }
 
-// 信息处理函数
-func parseMessageContent(paramsMessage callapi.ParamsContent, message callapi.ActionMessage, client callapi.Client, api openapi.OpenAPI, apiv2 openapi.OpenAPI) (string, map[string][]string) {
-	messageText := ""
+// 公共函数：统一清洗 markdown/ark 内容，直接返回 标准JSON字符串（下游零解码，直接使用）
+// 支持输入：map结构体、原始JSON字符串、带base64://前缀的旧格式
+// 输出：标准格式化的JSON字符串，下游直接 []byte(content) 即可使用
+func processJsonContent(content interface{}) (string, error) {
+	var jsonBytes []byte
+	var err error
 
+	switch v := content.(type) {
+	case map[string]interface{}:
+		// Map 直接序列化为标准 JSON
+		jsonBytes, err = json.Marshal(v)
+		if err != nil {
+			return "", fmt.Errorf("map转JSON失败: %w", err)
+		}
+
+	case string:
+		cleanContent := strings.TrimSpace(v)
+
+		// 兼容旧格式：移除 base64:// 前缀并解码（仅兼容历史数据，不再二次编码）
+		if strings.HasPrefix(cleanContent, "base64://") {
+			cleanContent = strings.TrimPrefix(cleanContent, "base64://")
+			// 解码Base64得到原始JSON
+			decodedBytes, err := base64.StdEncoding.DecodeString(cleanContent)
+			if err != nil {
+				return "", fmt.Errorf("Base64解码失败: %w", err)
+			}
+			cleanContent = string(decodedBytes)
+		}
+
+		// 统一反转义特殊字符
+		cleanContent = strings.ReplaceAll(cleanContent, "&amp;", "&")
+		cleanContent = strings.ReplaceAll(cleanContent, "&#91;", "[")
+		cleanContent = strings.ReplaceAll(cleanContent, "&#93;", "]")
+		cleanContent = strings.ReplaceAll(cleanContent, "&#44;", ",")
+
+		// 校验JSON合法性 + 标准化格式化（保证格式统一）
+		var tempObj interface{}
+		if err = json.Unmarshal([]byte(cleanContent), &tempObj); err != nil {
+			return "", fmt.Errorf("非法JSON格式: %w", err)
+		}
+		// 重新序列化为标准JSON
+		jsonBytes, err = json.Marshal(tempObj)
+		if err != nil {
+			return "", fmt.Errorf("JSON标准化失败: %w", err)
+		}
+
+	default:
+		return "", fmt.Errorf("不支持的内容类型: %T", content)
+	}
+
+	// ✅ 关键修改：直接返回标准JSON字符串，不再做任何Base64编码
+	return string(jsonBytes), nil
+}
+func parseMessageContent(paramsMessage callapi.ParamsContent) (string, map[string][]string) {
+	messageText := ""
 	foundItems := make(map[string][]string)
 
 	switch message := paramsMessage.Message.(type) {
 	case string:
-		mylog.Printf("params.message is a string\n")
+		mylog.Printf("纯文本消息\n")
 		messageText = message
-		// 直接应用替换规则
-		if config.GetEnableChangeWord() {
-			messageText = acnode.CheckWordOUT(messageText)
-		}
-		if paramsMessage.GroupID == nil {
-			// 解析[CQ:avatar,qq=123456]
-			messageText = ProcessCQAvatarNoGroupID(messageText)
-		} else {
-			// 解析[CQ:avatar,qq=123456]
-			messageText = ProcessCQAvatar(paramsMessage.GroupID.(string), messageText)
-		}
+
 	case []interface{}:
-		mylog.Printf("params.message is a slice (segment_type_koishi)\n")
+		mylog.Printf("消息为数组类型\n")
 		for _, segment := range message {
 			segmentMap, ok := segment.(map[string]interface{})
 			if !ok {
@@ -661,100 +698,38 @@ func parseMessageContent(paramsMessage callapi.ParamsContent, message callapi.Ac
 
 			case "markdown":
 				mdContent, ok := segmentMap["data"].(map[string]interface{})["data"]
-				if ok {
-					var mdContentEncoded string
-					if mdContentMap, isMap := mdContent.(map[string]interface{}); isMap {
-						mdContentBytes, err := json.Marshal(mdContentMap)
-						if err != nil {
-							mylog.Printf("Error marshaling mdContentMap to JSON:%v", err)
-							continue
-						}
-						mdContentEncoded = base64.StdEncoding.EncodeToString(mdContentBytes)
-					} else if mdContentStr, isString := mdContent.(string); isString {
-						if strings.HasPrefix(mdContentStr, "base64://") {
-							mdContentEncoded = strings.TrimPrefix(mdContentStr, "base64://")
-						} else {
-							mdContentStr = strings.ReplaceAll(mdContentStr, "&amp;", "&")
-							mdContentStr = strings.ReplaceAll(mdContentStr, "&#91;", "[")
-							mdContentStr = strings.ReplaceAll(mdContentStr, "&#93;", "]")
-							mdContentStr = strings.ReplaceAll(mdContentStr, "&#44;", ",")
+				if !ok {
+					mylog.Printf("markdown数据为空")
+					continue
+				}
+				// 直接获取标准JSON字符串，下游无需解码
+				jsonStr, err := processJsonContent(mdContent)
+				if err != nil {
+					mylog.Printf("处理markdown失败: %v", err)
+					continue
+				}
+				foundItems["markdown"] = append(foundItems["markdown"], jsonStr)
 
-							var jsonMap map[string]interface{}
-							if err := json.Unmarshal([]byte(mdContentStr), &jsonMap); err != nil {
-								mylog.Printf("Error unmarshaling string to JSON:%v", err)
-								continue
-							}
-							mdContentBytes, err := json.Marshal(jsonMap)
-							if err != nil {
-								mylog.Printf("Error marshaling jsonMap to JSON:%v", err)
-								continue
-							}
-							mdContentEncoded = base64.StdEncoding.EncodeToString(mdContentBytes)
-						}
-					} else {
-						mylog.Printf("Error marshaling markdown segment wrong type.")
-						continue
-					}
-					foundItems["markdown"] = append(foundItems["markdown"], mdContentEncoded)
-				} else {
-					mylog.Printf("Error: markdown segment data is nil.")
-				}
 			case "ark":
-				// 处理 ark 类型的消息段
 				arkContent, ok := segmentMap["data"].(map[string]interface{})["data"]
-				if ok {
-					var arkContentEncoded string
-					// 检查 arkContent 的类型
-					if arkContentMap, isMap := arkContent.(map[string]interface{}); isMap {
-						arkContentBytes, err := json.Marshal(arkContentMap)
-						if err != nil {
-							mylog.Printf("Error marshaling arkContentMap to JSON:%v", err)
-							continue
-						}
-						// 编码为 Base64 字符串
-						arkContentEncoded = base64.StdEncoding.EncodeToString(arkContentBytes)
-					} else if arkContentStr, isString := arkContent.(string); isString {
-						// 检查是否为 Base64 编码的字符串
-						if strings.HasPrefix(arkContentStr, "base64://") {
-							// 去掉 "base64://" 头部
-							arkContentEncoded = strings.TrimPrefix(arkContentStr, "base64://")
-						} else {
-							// 特殊字符反转义
-							arkContentStr = strings.ReplaceAll(arkContentStr, "&amp;", "&")
-							arkContentStr = strings.ReplaceAll(arkContentStr, "&#91;", "[")
-							arkContentStr = strings.ReplaceAll(arkContentStr, "&#93;", "]")
-							arkContentStr = strings.ReplaceAll(arkContentStr, "&#44;", ",")
-							var jsonMap map[string]interface{}
-							// 反序列化字符串为 JSON 对象
-							if err := json.Unmarshal([]byte(arkContentStr), &jsonMap); err != nil {
-								mylog.Printf("Error unmarshaling string to JSON:%v", err)
-								continue
-							}
-							// 将 JSON 对象序列化为字节数组
-							arkContentBytes, err := json.Marshal(jsonMap)
-							if err != nil {
-								mylog.Printf("Error marshaling jsonMap to JSON:%v", err)
-								continue
-							}
-							// 将字节数组编码为 Base64 字符串
-							arkContentEncoded = base64.StdEncoding.EncodeToString(arkContentBytes)
-						}
-					} else {
-						mylog.Printf("Error marshaling ark segment wrong type.")
-						continue
-					}
-					foundItems["ark"] = append(foundItems["ark"], arkContentEncoded)
-				} else {
-					mylog.Printf("Error: ark segment data is nil.")
+				if !ok {
+					mylog.Printf("ark数据为空")
+					continue
 				}
+				// 直接获取标准JSON字符串，下游无需解码
+				jsonStr, err := processJsonContent(arkContent)
+				if err != nil {
+					mylog.Printf("处理ark失败: %v", err)
+					continue
+				}
+				foundItems["ark"] = append(foundItems["ark"], jsonStr)
 
 			default:
-				mylog.Printf("Unhandled segment type: %s", segmentType)
+				mylog.Printf("未处理的消息类型: %s", segmentType)
 			}
-
 			messageText += segmentContent
-
 		}
+
 	case map[string]interface{}:
 		mylog.Printf("params.message is a map (segment_type_trss)\n")
 		messageType, _ := message["type"].(string)
@@ -841,304 +816,33 @@ func parseMessageContent(paramsMessage callapi.ParamsContent, message callapi.Ac
 
 		case "markdown":
 			mdContent, ok := message["data"].(map[string]interface{})["data"]
-			if ok {
-				var mdContentEncoded string
-				if mdContentMap, isMap := mdContent.(map[string]interface{}); isMap {
-					mdContentBytes, err := json.Marshal(mdContentMap)
-					if err != nil {
-						mylog.Printf("Error marshaling mdContentMap to JSON:%v", err)
-					}
-					mdContentEncoded = base64.StdEncoding.EncodeToString(mdContentBytes)
-				} else if mdContentStr, isString := mdContent.(string); isString {
-					if strings.HasPrefix(mdContentStr, "base64://") {
-						mdContentEncoded = strings.TrimPrefix(mdContentStr, "base64://")
-					} else {
-						mdContentStr = strings.ReplaceAll(mdContentStr, "&amp;", "&")
-						mdContentStr = strings.ReplaceAll(mdContentStr, "&#91;", "[")
-						mdContentStr = strings.ReplaceAll(mdContentStr, "&#93;", "]")
-						mdContentStr = strings.ReplaceAll(mdContentStr, "&#44;", ",")
-						var jsonMap map[string]interface{}
-						if err := json.Unmarshal([]byte(mdContentStr), &jsonMap); err != nil {
-							mylog.Printf("Error unmarshaling string to JSON:%v", err)
-						}
-						mdContentBytes, err := json.Marshal(jsonMap)
-						if err != nil {
-							mylog.Printf("Error marshaling jsonMap to JSON:%v", err)
-						}
-						mdContentEncoded = base64.StdEncoding.EncodeToString(mdContentBytes)
-					}
-				} else {
-					mylog.Printf("Error: markdown content has an unexpected type.")
-				}
-				foundItems["markdown"] = append(foundItems["markdown"], mdContentEncoded)
-			} else {
-				mylog.Printf("Error: markdown segment data is nil.")
+			if !ok {
+				mylog.Printf("markdown数据为空")
 			}
+			jsonStr, err := processJsonContent(mdContent)
+			if err != nil {
+				mylog.Printf("处理markdown失败: %v", err)
+			}
+			foundItems["markdown"] = append(foundItems["markdown"], jsonStr)
+
 		case "ark":
 			arkContent, ok := message["data"].(map[string]interface{})["data"]
-			if ok {
-				var arkContentEncoded string
-				if arkContentMap, isMap := arkContent.(map[string]interface{}); isMap {
-					arkContentBytes, err := json.Marshal(arkContentMap)
-					if err != nil {
-						mylog.Printf("Error marshaling mdContentMap to JSON:%v", err)
-					}
-					arkContentEncoded = base64.StdEncoding.EncodeToString(arkContentBytes)
-				} else if arkContentStr, isString := arkContent.(string); isString {
-					if strings.HasPrefix(arkContentStr, "base64://") {
-						arkContentEncoded = strings.TrimPrefix(arkContentStr, "base64://")
-					} else {
-						arkContentStr = strings.ReplaceAll(arkContentStr, "&amp;", "&")
-						arkContentStr = strings.ReplaceAll(arkContentStr, "&#91;", "[")
-						arkContentStr = strings.ReplaceAll(arkContentStr, "&#93;", "]")
-						arkContentStr = strings.ReplaceAll(arkContentStr, "&#44;", ",")
-						var jsonMap map[string]interface{}
-						if err := json.Unmarshal([]byte(arkContentStr), &jsonMap); err != nil {
-							mylog.Printf("Error unmarshaling string to JSON:%v", err)
-						}
-						mdContentBytes, err := json.Marshal(jsonMap)
-						if err != nil {
-							mylog.Printf("Error marshaling jsonMap to JSON:%v", err)
-						}
-						arkContentEncoded = base64.StdEncoding.EncodeToString(mdContentBytes)
-					}
-				} else {
-					mylog.Printf("Error: ark content has an unexpected type.")
-				}
-				foundItems["ark"] = append(foundItems["ark"], arkContentEncoded)
-			} else {
-				mylog.Printf("Error: ark segment data is nil.")
+			if !ok {
+				mylog.Printf("ark数据为空")
 			}
-
+			jsonStr, err := processJsonContent(arkContent)
+			if err != nil {
+				mylog.Printf("处理ark失败: %v", err)
+			}
+			foundItems["ark"] = append(foundItems["ark"], jsonStr)
 		default:
-			mylog.Printf("Unhandled message type: %s", messageType)
+			mylog.Printf("不支持的消息格式: %s", messageType)
 		}
-
 	default:
-		mylog.Println("Unsupported message format: params.message field is not a string, map or slice")
+		mylog.Println("上报数据格式不受支持")
 	}
 
-	if paramsMessage.GroupID == nil {
-		//处理at
-		messageText = transformMessageTextAtNoGroupID(messageText)
-	} else {
-		//处理at
-		messageText = transformMessageTextAt(messageText, paramsMessage.GroupID.(string))
-	}
-
-	// 当匹配到复古cq码上报类型,使用低效率正则.
-	if _, ok := paramsMessage.Message.(string); ok {
-		// 正则表达式部分
-		var localImagePattern *regexp.Regexp
-		var localRecordPattern *regexp.Regexp
-		if runtime.GOOS == "windows" {
-			localImagePattern = regexp.MustCompile(`\[CQ:image,file=file:///([^\]]+?)\]`)
-		} else {
-			localImagePattern = regexp.MustCompile(`\[CQ:image,file=file://([^\]]+?)\]`)
-		}
-		if runtime.GOOS == "windows" {
-			localRecordPattern = regexp.MustCompile(`\[CQ:record,file=file:///([^\]]+?)\]`)
-		} else {
-			localRecordPattern = regexp.MustCompile(`\[CQ:record,file=file://([^\]]+?)\]`)
-		}
-		httpUrlImagePattern := regexp.MustCompile(`\[CQ:image,file=http://(.+?)\]`)
-		httpsUrlImagePattern := regexp.MustCompile(`\[CQ:image,file=https://(.+?)\]`)
-		base64ImagePattern := regexp.MustCompile(`\[CQ:image,file=base64://(.+?)\]`)
-		base64RecordPattern := regexp.MustCompile(`\[CQ:record,file=base64://(.+?)\]`)
-		httpUrlRecordPattern := regexp.MustCompile(`\[CQ:record,file=http://(.+?)\]`)
-		httpsUrlRecordPattern := regexp.MustCompile(`\[CQ:record,file=https://(.+?)\]`)
-		httpUrlVideoPattern := regexp.MustCompile(`\[CQ:video,file=http://(.+?)\]`)
-		httpsUrlVideoPattern := regexp.MustCompile(`\[CQ:video,file=https://(.+?)\]`)
-		mdPattern := regexp.MustCompile(`\[CQ:markdown,data=base64://(.+?)\]`)
-		qqMusicPattern := regexp.MustCompile(`\[CQ:music,type=qq,id=(\d+)\]`)
-
-		patterns := []struct {
-			key     string
-			pattern *regexp.Regexp
-		}{
-			{"local_image", localImagePattern},
-			{"url_image", httpUrlImagePattern},
-			{"url_images", httpsUrlImagePattern},
-			{"base64_image", base64ImagePattern},
-			{"base64_record", base64RecordPattern},
-			{"local_record", localRecordPattern},
-			{"url_record", httpUrlRecordPattern},
-			{"url_records", httpsUrlRecordPattern},
-			{"markdown", mdPattern},
-			{"qqmusic", qqMusicPattern},
-			{"url_video", httpUrlVideoPattern},
-			{"url_videos", httpsUrlVideoPattern},
-		}
-
-		for _, pattern := range patterns {
-			matches := pattern.pattern.FindAllStringSubmatch(messageText, -1)
-			for _, match := range matches {
-				if len(match) > 1 {
-					foundItems[pattern.key] = append(foundItems[pattern.key], match[1])
-				}
-			}
-			// 移动替换操作到这里，确保所有匹配都被处理后再进行替换
-			messageText = pattern.pattern.ReplaceAllString(messageText, "")
-		}
-	}
-
-	//最后再处理Url
-	messageText = transformMessageTextUrl(messageText, message, client, api, apiv2)
-
-	// for key, items := range foundItems {
-	// 	fmt.Printf("Key: %s, Items: %v\n", key, items)
-	// }
 	return messageText, foundItems
-}
-
-func isIPAddress(address string) bool {
-	return net.ParseIP(address) != nil
-}
-
-// at处理
-func transformMessageTextAt(messageText string, groupid string) string {
-	// DoNotReplaceAppid=false(默认频道bot,需要自己at自己时,否则改成true)
-	if !config.GetDoNotReplaceAppid() {
-		// 首先，将AppID替换为BotID
-		messageText = strings.ReplaceAll(messageText, AppID, BotID)
-	}
-
-	// 去除所有[CQ:reply,id=数字] todo 更好的处理办法
-	replyRE := regexp.MustCompile(`\[CQ:reply,id=\d+\]`)
-	messageText = replyRE.ReplaceAllString(messageText, "")
-
-	// 使用正则表达式来查找所有[CQ:at,qq=数字]的模式
-	re := regexp.MustCompile(`\[CQ:at,qq=(\d+)\]`)
-	messageText = re.ReplaceAllStringFunc(messageText, func(m string) string {
-		submatches := re.FindStringSubmatch(m)
-		if len(submatches) > 1 {
-			var realUserID string
-			var err error
-			if config.GetIdmapPro() {
-				_, realUserID, err = idmap.RetrieveRowByIDv2Pro(groupid, submatches[1])
-			} else {
-				realUserID, err = idmap.RetrieveRowByIDv2(submatches[1])
-			}
-			if err != nil {
-				// 如果出错，也替换成相应的格式，但使用原始QQ号
-				mylog.Printf("Error retrieving user ID: %v", err)
-				return "<@!" + submatches[1] + ">"
-			}
-
-			// 在这里检查 GetRemoveBotAtGroup 和 realUserID 的长度
-			if config.GetRemoveBotAtGroup() && len(realUserID) == 32 {
-				return ""
-			}
-
-			return "<@!" + realUserID + ">"
-		}
-		return m
-	})
-	return messageText
-}
-
-// at处理
-func transformMessageTextAtNoGroupID(messageText string) string {
-	// DoNotReplaceAppid=false(默认频道bot,需要自己at自己时,否则改成true)
-	if !config.GetDoNotReplaceAppid() {
-		// 首先，将AppID替换为BotID
-		messageText = strings.ReplaceAll(messageText, AppID, BotID)
-	}
-
-	// 去除所有[CQ:reply,id=数字] todo 更好的处理办法
-	replyRE := regexp.MustCompile(`\[CQ:reply,id=\d+\]`)
-	messageText = replyRE.ReplaceAllString(messageText, "")
-
-	// 使用正则表达式来查找所有[CQ:at,qq=数字]的模式
-	re := regexp.MustCompile(`\[CQ:at,qq=(\d+)\]`)
-	messageText = re.ReplaceAllStringFunc(messageText, func(m string) string {
-		submatches := re.FindStringSubmatch(m)
-		if len(submatches) > 1 {
-			var realUserID string
-			var err error
-			if config.GetIdmapPro() {
-				// 这是个魔法数 代表私聊
-				_, realUserID, err = idmap.RetrieveRowByIDv2Pro("690426430", submatches[1])
-			} else {
-				realUserID, err = idmap.RetrieveRowByIDv2(submatches[1])
-			}
-			if err != nil {
-				// 如果出错，也替换成相应的格式，但使用原始QQ号
-				mylog.Printf("Error retrieving user ID: %v", err)
-				return "<@!" + submatches[1] + ">"
-			}
-
-			// 在这里检查 GetRemoveBotAtGroup 和 realUserID 的长度
-			if config.GetRemoveBotAtGroup() && len(realUserID) == 32 {
-				return ""
-			}
-
-			return "<@!" + realUserID + ">"
-		}
-		return m
-	})
-	return messageText
-}
-
-// 链接处理
-func transformMessageTextUrl(messageText string, message callapi.ActionMessage, client callapi.Client, api openapi.OpenAPI, apiv2 openapi.OpenAPI) string {
-	// 是否处理url
-	if config.GetTransferUrl() {
-		// 判断服务器地址是否是IP地址
-		serverAddress := config.GetServer_dir()
-		isIP := isIPAddress(serverAddress)
-		VisualIP := config.GetVisibleIP()
-
-		// 使用xurls来查找和替换所有的URL
-		messageText = xurls.Relaxed.ReplaceAllStringFunc(messageText, func(originalURL string) string {
-			// 当服务器地址是IP地址且GetVisibleIP为false时，替换URL为空
-			if isIP && !VisualIP {
-				return ""
-			}
-
-			// 如果启用了URL到QR码的转换
-			if config.GetUrlToQrimage() {
-				// 将URL转换为QR码的字节形式
-				qrCodeGenerator, _ := qrcode.New(originalURL, qrcode.High)
-				qrCodeGenerator.DisableBorder = true
-				qrSize := config.GetQrSize()
-				pngBytes, _ := qrCodeGenerator.PNG(qrSize)
-				//pngBytes 二维码图片的字节数据
-				base64Image := base64.StdEncoding.EncodeToString(pngBytes)
-				picmsg := processActionMessageWithBase64PicReplace(base64Image, message)
-				ret := callapi.CallAPIFromDict(client, api, apiv2, picmsg)
-				mylog.Printf("发送url转图片结果:%v", ret)
-				// 从文本中去除原始URL
-				return "" // 返回空字符串以去除URL
-			}
-
-			// 根据配置处理URL
-			if config.GetLotusValue() {
-				// 连接到另一个gensokyo
-				mylog.Printf("转换url:%v", originalURL)
-				shortURL := url.GenerateShortURL(originalURL)
-				return shortURL
-			} else {
-				// 自己是主节点
-				shortURL := url.GenerateShortURL(originalURL)
-				// 使用getBaseURL函数来获取baseUrl并与shortURL组合
-				return url.GetBaseURL() + "/url/" + shortURL
-			}
-		})
-	}
-	return messageText
-}
-
-// processActionMessageWithBase64PicReplace 将原有的callapi.ActionMessage内容替换为一个base64图片
-func processActionMessageWithBase64PicReplace(base64Image string, message callapi.ActionMessage) callapi.ActionMessage {
-	newMessage := createCQImageMessage(base64Image)
-	message.Params.Message = newMessage
-	return message
-}
-
-// createCQImageMessage 从 base64 编码的图片创建 CQ 码格式的消息
-func createCQImageMessage(base64Image string) string {
-	return "[CQ:image,file=base64://" + base64Image + "]"
 }
 
 // 处理at和其他定形文到onebotv11格式(cq码)
@@ -1764,11 +1468,7 @@ func ConvertMapToJSONString(m map[string]interface{}) (string, error) {
 func parseMDData(mdData []byte) (*dto.Markdown, *keyboard.MessageKeyboard, error) {
 	// 定义一个用于解析 JSON 的临时结构体
 	var temp struct {
-		Markdown struct {
-			CustomTemplateID *string               `json:"custom_template_id,omitempty"`
-			Params           []*dto.MarkdownParams `json:"params,omitempty"`
-			Content          string                `json:"content,omitempty"`
-		} `json:"markdown,omitempty"`
+		Markdown dto.Markdown
 		Keyboard struct {
 			ID      string                   `json:"id,omitempty"`
 			Content *keyboard.CustomKeyboard `json:"content,omitempty"`
@@ -1780,22 +1480,7 @@ func parseMDData(mdData []byte) (*dto.Markdown, *keyboard.MessageKeyboard, error
 	if err := json.Unmarshal(mdData, &temp); err != nil {
 		return nil, nil, err
 	}
-
-	// 处理 Markdown
-	var md *dto.Markdown
-	if temp.Markdown.CustomTemplateID != nil {
-		// 处理模板 Markdown
-		md = &dto.Markdown{
-			CustomTemplateID: *temp.Markdown.CustomTemplateID,
-			Params:           temp.Markdown.Params,
-			Content:          temp.Markdown.Content,
-		}
-	} else if temp.Markdown.Content != "" {
-		// 处理自定义 Markdown
-		md = &dto.Markdown{
-			Content: temp.Markdown.Content,
-		}
-	}
+	md := &temp.Markdown
 
 	// 处理 Keyboard
 	var kb *keyboard.MessageKeyboard

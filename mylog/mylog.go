@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/hoshinonyaruko/gensokyo/config"
 )
@@ -328,40 +327,6 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		return true
 	},
-}
-
-func WsHandlerWithDependencies(c *gin.Context) {
-	ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
-	if err != nil {
-		fmt.Println("无法升级为websocket:", err)
-		return
-	}
-
-	client := &Client{conn: ws, send: make(chan EnhancedLogEntry)}
-
-	lock.Lock()
-	wsClients[client] = true
-	lock.Unlock()
-
-	// 输出新的 WebSocket 客户端连接信息
-	fmt.Println("新的webui用户已连接!")
-
-	go client.writePump()
-	go client.readPump()
-
-	for logEntry := range LogChannel() {
-		lock.RLock()
-		// 去掉对wsClients长度的检查，已经在emitLog里面做了防阻塞处理
-		for client := range wsClients {
-			select {
-			case client.send <- logEntry:
-				// 成功发送日志到客户端
-			default:
-				// 客户端的send通道满了，可以选择断开客户端连接或者其他处理
-			}
-		}
-		lock.RUnlock()
-	}
 }
 
 func (c *Client) readPump() {

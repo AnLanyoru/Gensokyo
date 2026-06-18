@@ -12,8 +12,6 @@ import (
 	"runtime"
 	"strings"
 	"time"
-
-	"golang.org/x/net/html"
 )
 
 // Restarter is the interface that wraps the Restart method.
@@ -96,23 +94,6 @@ func GetPublicIP() (string, error) {
 	return publicIP, nil
 }
 
-// findIFrameSrc 遍历HTML节点以找到iframe标签的src属性
-func findIFrameSrc(n *html.Node) (string, bool) {
-	if n.Type == html.ElementNode && n.Data == "iframe" {
-		for _, a := range n.Attr {
-			if a.Key == "src" {
-				return a.Val, true
-			}
-		}
-	}
-	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		if src, found := findIFrameSrc(c); found {
-			return src, true
-		}
-	}
-	return "", false
-}
-
 // GetExecutableName 返回当前执行文件的名称
 func GetExecutableName() (string, error) {
 	executable, err := os.Executable()
@@ -190,49 +171,4 @@ func RestartApplication() {
 
 	// 退出程序
 	os.Exit(0)
-}
-
-func findIP(node *html.Node) (string, bool) {
-	if node.Type == html.ElementNode && node.Data == "iframe" {
-		for _, a := range node.Attr {
-			if a.Key == "src" {
-				// We found the iframe, now let's send a request to the src URL
-				resp, err := http.Get(a.Val)
-				if err != nil {
-					return "", false
-				}
-				defer resp.Body.Close()
-				if resp.StatusCode != http.StatusOK {
-					return "", false
-				}
-				doc, err := html.Parse(resp.Body)
-				if err != nil {
-					return "", false
-				}
-				// The actual IP might be in a <div> or <span>, depending on the page structure
-				var f func(*html.Node) string
-				f = func(n *html.Node) string {
-					if n.Type == html.TextNode && strings.HasPrefix(n.Data, "您的IP地址信息:") {
-						return strings.TrimSpace(strings.Split(n.Data, " ")[1])
-					}
-					for c := n.FirstChild; c != nil; c = c.NextSibling {
-						if result := f(c); result != "" {
-							return result
-						}
-					}
-					return ""
-				}
-				ip := f(doc)
-				if ip != "" {
-					return ip, true
-				}
-			}
-		}
-	}
-	for c := node.FirstChild; c != nil; c = c.NextSibling {
-		if ip, found := findIP(c); found {
-			return ip, true
-		}
-	}
-	return "", false
 }
